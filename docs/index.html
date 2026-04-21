@@ -1,0 +1,770 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>경매 레이더 — 아파트 경매 분석</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:       #0a0c10;
+    --surface:  #111520;
+    --card:     #161b27;
+    --border:   #1e2535;
+    --accent:   #3b82f6;
+    --accent2:  #06b6d4;
+    --good:     #10b981;
+    --warn:     #f59e0b;
+    --danger:   #ef4444;
+    --text:     #e2e8f0;
+    --muted:    #64748b;
+    --mono:     'JetBrains Mono', monospace;
+    --sans:     'Noto Sans KR', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    min-height: 100vh;
+    font-size: 14px;
+  }
+
+  /* ── 헤더 ── */
+  header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 28px;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  .logo {
+    font-family: var(--mono);
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--accent2);
+    letter-spacing: -0.5px;
+  }
+  .logo span { color: var(--accent); }
+  .meta-info {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    margin-left: auto;
+  }
+  .badge {
+    display: inline-block;
+    background: rgba(59,130,246,0.15);
+    color: var(--accent);
+    border: 1px solid rgba(59,130,246,0.3);
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-size: 11px;
+    font-family: var(--mono);
+  }
+
+  /* ── 레이아웃 ── */
+  .layout {
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    gap: 0;
+    min-height: calc(100vh - 57px);
+  }
+
+  /* ── 사이드바 필터 ── */
+  aside {
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  .filter-section h3 {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--muted);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+  }
+  .filter-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  label {
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 2px;
+    display: block;
+  }
+  input[type="number"], input[type="text"], select {
+    width: 100%;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    padding: 8px 10px;
+    font-family: var(--mono);
+    font-size: 12px;
+    outline: none;
+    transition: border-color .2s;
+  }
+  input:focus, select:focus {
+    border-color: var(--accent);
+  }
+  .range-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
+
+  .btn {
+    width: 100%;
+    padding: 10px;
+    border: none;
+    border-radius: 6px;
+    font-family: var(--sans);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all .2s;
+  }
+  .btn-primary {
+    background: var(--accent);
+    color: #fff;
+  }
+  .btn-primary:hover { background: #2563eb; }
+  .btn-secondary {
+    background: var(--card);
+    color: var(--muted);
+    border: 1px solid var(--border);
+    margin-top: 6px;
+  }
+  .btn-secondary:hover { color: var(--text); border-color: var(--muted); }
+
+  /* ── 메인 컨텐츠 ── */
+  main {
+    padding: 20px 24px;
+    overflow: auto;
+  }
+
+  /* ── 요약 카드 ── */
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  .stat-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+  }
+  .stat-label {
+    font-size: 11px;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+  .stat-value {
+    font-family: var(--mono);
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .stat-value.good { color: var(--good); }
+  .stat-value.warn { color: var(--warn); }
+  .stat-sub {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 4px;
+  }
+
+  /* ── 테이블 ── */
+  .table-wrap {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .table-header {
+    padding: 14px 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .table-title {
+    font-size: 13px;
+    font-weight: 500;
+  }
+  .count-badge {
+    font-family: var(--mono);
+    font-size: 11px;
+    background: rgba(59,130,246,0.1);
+    color: var(--accent);
+    border-radius: 12px;
+    padding: 2px 10px;
+  }
+  .sort-controls {
+    margin-left: auto;
+    display: flex;
+    gap: 6px;
+  }
+  .sort-btn {
+    font-family: var(--mono);
+    font-size: 11px;
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    padding: 4px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .sort-btn:hover, .sort-btn.active {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  thead th {
+    background: rgba(255,255,255,0.02);
+    text-align: left;
+    padding: 10px 14px;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--muted);
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  tbody tr {
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    transition: background .15s;
+    cursor: pointer;
+  }
+  tbody tr:hover { background: rgba(59,130,246,0.05); }
+  tbody tr:last-child { border-bottom: none; }
+  td {
+    padding: 12px 14px;
+    font-size: 13px;
+    vertical-align: middle;
+  }
+  .case-num {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--accent2);
+  }
+  .address {
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .address-full {
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .price {
+    font-family: var(--mono);
+    font-weight: 600;
+    text-align: right;
+    white-space: nowrap;
+  }
+  .price-appraisal { color: var(--muted); font-weight: 400; }
+  .price-min { color: var(--text); }
+
+  .rate-pill {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 600;
+    padding: 3px 10px;
+    border-radius: 20px;
+    white-space: nowrap;
+  }
+  .rate-low  { background: rgba(16,185,129,0.15); color: var(--good); }
+  .rate-mid  { background: rgba(245,158,11,0.15);  color: var(--warn); }
+  .rate-high { background: rgba(239,68,68,0.15);   color: var(--danger); }
+
+  .status-tag {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    white-space: nowrap;
+  }
+  .status-new  { background: rgba(16,185,129,0.1); color: var(--good); }
+  .status-fail { background: rgba(245,158,11,0.1); color: var(--warn); }
+  .status-etc  { background: rgba(100,116,139,0.15); color: var(--muted); }
+
+  .link-btn {
+    font-size: 11px;
+    color: var(--accent);
+    text-decoration: none;
+    border: 1px solid rgba(59,130,246,0.3);
+    padding: 3px 8px;
+    border-radius: 4px;
+    transition: all .15s;
+  }
+  .link-btn:hover { background: rgba(59,130,246,0.1); }
+
+  /* ── 빈 상태 ── */
+  .empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--muted);
+  }
+  .empty-icon { font-size: 48px; margin-bottom: 16px; }
+  .empty-title { font-size: 16px; font-weight: 500; margin-bottom: 8px; color: var(--text); }
+  .empty-desc { font-size: 13px; line-height: 1.6; }
+
+  /* ── JSON 불러오기 드롭존 ── */
+  .dropzone {
+    border: 2px dashed var(--border);
+    border-radius: 10px;
+    padding: 32px;
+    text-align: center;
+    cursor: pointer;
+    transition: all .2s;
+    margin-bottom: 20px;
+  }
+  .dropzone:hover, .dropzone.drag-over {
+    border-color: var(--accent);
+    background: rgba(59,130,246,0.05);
+  }
+  .dropzone-icon { font-size: 32px; margin-bottom: 10px; }
+  .dropzone-text { font-size: 13px; color: var(--muted); }
+  .dropzone-hint { font-size: 11px; color: var(--muted); margin-top: 6px; font-family: var(--mono); }
+
+  /* ── 모달 (상세) ── */
+  .modal-bg {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.7);
+    z-index: 200;
+    align-items: center;
+    justify-content: center;
+  }
+  .modal-bg.open { display: flex; }
+  .modal {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 28px;
+    width: 540px;
+    max-height: 80vh;
+    overflow-y: auto;
+  }
+  .modal h2 { font-size: 16px; margin-bottom: 20px; }
+  .modal-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  .modal-field label {
+    font-size: 11px;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+  .modal-field .val {
+    font-family: var(--mono);
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .modal-close {
+    float: right;
+    background: none;
+    border: none;
+    color: var(--muted);
+    font-size: 20px;
+    cursor: pointer;
+    line-height: 1;
+  }
+  .modal-close:hover { color: var(--text); }
+
+  /* ── 로더 ── */
+  .spinner {
+    display: none;
+    width: 18px; height: 18px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin .6s linear infinite;
+    margin: 0 auto;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── 스크롤바 ── */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  /* ── 반응형 ── */
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: 1fr; }
+    aside { border-right: none; border-bottom: 1px solid var(--border); }
+    .summary-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">경매<span>레이더</span></div>
+  <span class="badge">아파트 전용</span>
+  <div class="meta-info" id="meta-info">데이터 없음</div>
+</header>
+
+<div class="layout">
+  <!-- ── 사이드바 ── -->
+  <aside>
+    <!-- 데이터 상태 -->
+    <div class="filter-section">
+      <h3>데이터</h3>
+      <div id="refresh-status" style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:8px;line-height:1.8">로딩 중...</div>
+      <button class="btn btn-secondary" onclick="loadData()" style="font-size:12px">⟳ 새로고침</button>
+    </div>
+
+    <!-- 필터 -->
+    <div class="filter-section">
+      <h3>필터</h3>
+      <div class="filter-group">
+        <div>
+          <label>최저입찰가 범위 (만원)</label>
+          <div class="range-row">
+            <input type="number" id="minPrice" placeholder="최소" step="1000">
+            <input type="number" id="maxPrice" placeholder="최대" step="1000">
+          </div>
+        </div>
+        <div>
+          <label>감정가 대비 입찰가율 (%)</label>
+          <div class="range-row">
+            <input type="number" id="minRate" placeholder="최소" step="1">
+            <input type="number" id="maxRate" placeholder="최대" step="1" value="100">
+          </div>
+        </div>
+        <div>
+          <label>전용면적 최소 (㎡)</label>
+          <input type="number" id="minArea" placeholder="예: 59">
+        </div>
+        <div>
+          <label>주소 검색</label>
+          <input type="text" id="addrSearch" placeholder="예: 수원, 성남">
+        </div>
+        <div>
+          <label>평형 (공급기준)</label>
+          <div class="range-row">
+            <input type="number" id="minPyeong" placeholder="최소" step="1" value="30">
+            <input type="number" id="maxPyeong" placeholder="최대" step="1">
+          </div>
+        </div>
+        <div>
+          <label>준공연도 (이후)</label>
+          <input type="number" id="minBuildYear" placeholder="예: 2011" value="2011">
+        </div>
+        <div>
+          <label>진행 상황</label>
+          <select id="statusFilter">
+            <option value="">전체</option>
+            <option value="신건">신건</option>
+            <option value="유찰">유찰</option>
+          </select>
+        </div>
+      </div>
+      <button class="btn btn-primary" onclick="applyFilters()">필터 적용</button>
+      <button class="btn btn-secondary" onclick="resetFilters()">초기화</button>
+    </div>
+
+    <!-- 통계 -->
+    <div class="filter-section" id="sidebar-stats" style="display:none">
+      <h3>현황 요약</h3>
+      <div id="stats-content" style="font-family:var(--mono);font-size:12px;line-height:2;color:var(--muted)"></div>
+    </div>
+  </aside>
+
+  <!-- ── 메인 ── -->
+  <main>
+    <div class="summary-grid" id="summary-grid" style="display:none">
+      <div class="stat-card">
+        <div class="stat-label">조회된 물건</div>
+        <div class="stat-value" id="s-total">0</div>
+        <div class="stat-sub">건</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">평균 입찰가율</div>
+        <div class="stat-value warn" id="s-avg-rate">0%</div>
+        <div class="stat-sub">감정가 대비</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">최저 입찰가율</div>
+        <div class="stat-value good" id="s-min-rate">0%</div>
+        <div class="stat-sub">가장 저렴한 물건</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">최저 입찰가</div>
+        <div class="stat-value" id="s-min-price">0</div>
+        <div class="stat-sub">최저가 물건</div>
+      </div>
+    </div>
+
+    <div id="empty-state" class="empty-state">
+      <div class="empty-icon">🏢</div>
+      <div class="empty-title">데이터 수집 전입니다</div>
+      <div class="empty-desc">
+        GitHub Actions가 매일 오전 7시에 자동 수집해요.<br>
+        첫 실행은 Actions 탭에서 수동으로 실행하세요.
+      </div>
+    </div>
+
+    <div class="table-wrap" id="table-wrap" style="display:none">
+      <div class="table-header">
+        <span class="table-title">경매 물건 목록</span>
+        <span class="count-badge" id="count-badge">0건</span>
+        <div class="sort-controls">
+          <button class="sort-btn active" onclick="sortBy('최저입찰가율')">입찰가율↑</button>
+          <button class="sort-btn" onclick="sortBy('최저입찰가')">최저가↑</button>
+          <button class="sort-btn" onclick="sortBy('감정가')">감정가↓</button>
+          <button class="sort-btn" onclick="sortBy('매각기일')">매각일</button>
+        </div>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>사건번호</th>
+            <th>소재지</th>
+            <th style="text-align:right">감정가</th>
+            <th style="text-align:right">최저입찰가</th>
+            <th style="text-align:center">입찰가율</th>
+            <th>매각기일</th>
+            <th>상태</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="table-body"></tbody>
+      </table>
+    </div>
+  </main>
+</div>
+
+<!-- 상세 모달 -->
+<div class="modal-bg" id="modal-bg" onclick="closeModal(event)">
+  <div class="modal" id="modal">
+    <button class="modal-close" onclick="closeModal()">✕</button>
+    <h2 id="modal-title">물건 상세</h2>
+    <div class="modal-grid" id="modal-body"></div>
+    <div style="margin-top:20px">
+      <a id="modal-link" href="#" target="_blank" class="btn btn-primary" style="display:inline-block;text-decoration:none;text-align:center;padding:10px 20px;border-radius:6px;font-size:13px">법원경매 사이트에서 보기 →</a>
+    </div>
+  </div>
+</div>
+
+<script>
+let rawData = [];
+let filtered = [];
+let sortKey = '최저입찰가율';
+let sortAsc = true;
+
+// ── 자동 데이터 로드 (GitHub Pages fetch) ──
+async function loadData() {
+  const statusEl = document.getElementById('refresh-status');
+  statusEl.textContent = '로딩 중...';
+  statusEl.style.color = 'var(--muted)';
+  try {
+    const res = await fetch('auction_data.json?t=' + Date.now());
+    if (!res.ok) throw new Error('파일 없음');
+    const json = await res.json();
+    rawData = json.items || [];
+    const cond = json.조건 || {};
+    document.getElementById('meta-info').textContent =
+      `수집: ${json.수집일시 || '-'} | 총 ${json.총건수 || rawData.length}건`;
+    statusEl.innerHTML =
+      `수집일시<br><span style="color:var(--text)">${json.수집일시 || '-'}</span><br>` +
+      `총건수<br><span style="color:var(--text)">${json.총건수 || rawData.length}건</span><br>` +
+      `기준<br><span style="color:var(--accent2)">${cond['준공기준'] || '-'} · ${cond['최소전용'] || '-'}</span>`;
+    applyFilters();
+    document.getElementById('table-wrap').style.display = 'block';
+    document.getElementById('empty-state').style.display = 'none';
+    document.getElementById('summary-grid').style.display = 'grid';
+    document.getElementById('sidebar-stats').style.display = 'block';
+  } catch (e) {
+    statusEl.innerHTML = `<span style="color:var(--warn)">데이터 없음<br>Actions 첫 실행 필요</span>`;
+    document.getElementById('empty-state').style.display = 'block';
+  }
+}
+
+window.addEventListener('DOMContentLoaded', loadData);
+
+
+// ── 필터 ──
+function applyFilters() {
+  const minPrice = (parseFloat(document.getElementById('minPrice').value) || 0) * 10000;
+  const maxPrice = (parseFloat(document.getElementById('maxPrice').value) || Infinity) * 10000;
+  const minRate      = parseFloat(document.getElementById('minRate').value) || 0;
+  const maxRate      = parseFloat(document.getElementById('maxRate').value) || 999;
+  const minArea      = parseFloat(document.getElementById('minArea').value) || 0;
+  const minPyeong    = parseFloat(document.getElementById('minPyeong').value) || 0;
+  const maxPyeong    = parseFloat(document.getElementById('maxPyeong').value) || 9999;
+  const minBuildYear = parseInt(document.getElementById('minBuildYear').value) || 0;
+  const addr         = document.getElementById('addrSearch').value.trim();
+  const status       = document.getElementById('statusFilter').value;
+
+  filtered = rawData.filter(item => {
+    if (item.최저입찰가 < minPrice || item.최저입찰가 > maxPrice) return false;
+    if (item.최저입찰가율 < minRate || item.최저입찰가율 > maxRate) return false;
+    if (minArea && (item.전용면적 || 0) < minArea) return false;
+    if (minPyeong && item.평형 !== null && item.평형 < minPyeong) return false;
+    if (maxPyeong < 9999 && item.평형 !== null && item.평형 > maxPyeong) return false;
+    if (minBuildYear && item.준공연도 !== null && item.준공연도 < minBuildYear) return false;
+    if (addr && !item.소재지.includes(addr)) return false;
+    if (status && !item.진행상황.includes(status)) return false;
+    return true;
+  });
+
+  sortData();
+  renderTable();
+  renderSummary();
+}
+
+function resetFilters() {
+  ['minPrice','maxPrice','minRate','addrSearch','minArea'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('maxRate').value = 100;
+  document.getElementById('minPyeong').value = 30;
+  document.getElementById('maxPyeong').value = '';
+  document.getElementById('minBuildYear').value = 2011;
+  document.getElementById('statusFilter').value = '';
+  applyFilters();
+}
+
+// ── 정렬 ──
+function sortBy(key) {
+  if (sortKey === key) sortAsc = !sortAsc;
+  else { sortKey = key; sortAsc = true; }
+  document.querySelectorAll('.sort-btn').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+  sortData();
+  renderTable();
+}
+
+function sortData() {
+  filtered.sort((a, b) => {
+    let av = a[sortKey] || 0, bv = b[sortKey] || 0;
+    if (typeof av === 'string') av = av.localeCompare(bv);
+    return sortAsc ? av - bv : bv - av;
+  });
+}
+
+// ── 렌더 ──
+function renderTable() {
+  const tbody = document.getElementById('table-body');
+  document.getElementById('count-badge').textContent = `${filtered.length}건`;
+
+  if (!filtered.length) {
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--muted)">조건에 맞는 물건이 없습니다</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = filtered.map((item, idx) => {
+    const rateClass = item.최저입찰가율 < 70 ? 'rate-low' : item.최저입찰가율 < 90 ? 'rate-mid' : 'rate-high';
+    const statusClass = item.진행상황.includes('신건') ? 'status-new' : item.진행상황.includes('유찰') ? 'status-fail' : 'status-etc';
+    const area = item.전용면적
+      ? `<br><span style="font-size:11px;color:var(--muted)">${item.전용면적}㎡(${item.평형}평) ${item.층수 ? '| '+item.층수 : ''}</span>`
+      : '';
+    const yearTag = item.준공연도
+      ? `<br><span style="font-size:10px;color:var(--accent2)">${item.준공연도}년 (${item.건축연수}년차)</span>`
+      : '';
+    const fail = item.유찰횟수 ? `<br><span style="font-size:10px;color:var(--warn)">유찰 ${item.유찰횟수}회</span>` : '';
+
+    return `
+      <tr onclick="openModal(${idx})">
+        <td><span class="case-num">${item.사건번호}</span></td>
+        <td><div class="address">${item.단지명 || item.소재지}</div><div class="address-full" style="font-size:11px;color:var(--muted)">${item.소재지}</div>${area}${yearTag}</td>
+        <td class="price price-appraisal">${item.감정가_표시 || fmt(item.감정가)}</td>
+        <td class="price price-min">${item.최저입찰가_표시 || fmt(item.최저입찰가)}</td>
+        <td style="text-align:center"><span class="rate-pill ${rateClass}">${item.최저입찰가율}%</span>${fail}</td>
+        <td style="font-size:12px;white-space:nowrap">${item.매각기일 || '-'}</td>
+        <td><span class="status-tag ${statusClass}">${item.진행상황 || '-'}</span></td>
+        <td>${item.상세링크 ? `<a class="link-btn" href="${item.상세링크}" target="_blank" onclick="event.stopPropagation()">보기</a>` : ''}</td>
+      </tr>`;
+  }).join('');
+}
+
+function renderSummary() {
+  const total = filtered.length;
+  if (!total) return;
+  const avgRate = (filtered.reduce((s,i) => s + i.최저입찰가율, 0) / total).toFixed(1);
+  const minRate = Math.min(...filtered.map(i => i.최저입찰가율));
+  const minPrice = Math.min(...filtered.map(i => i.최저입찰가));
+
+  document.getElementById('s-total').textContent = total;
+  document.getElementById('s-avg-rate').textContent = avgRate + '%';
+  document.getElementById('s-min-rate').textContent = minRate + '%';
+  document.getElementById('s-min-price').textContent = fmt(minPrice);
+
+  // 사이드바 통계
+  const신건 = filtered.filter(i => i.진행상황.includes('신건')).length;
+  const유찰 = filtered.filter(i => i.진행상황.includes('유찰')).length;
+  const under70 = filtered.filter(i => i.최저입찰가율 < 70).length;
+  document.getElementById('stats-content').innerHTML =
+    `신건: <span style="color:var(--good)">${신건}건</span><br>` +
+    `유찰: <span style="color:var(--warn)">${유찰}건</span><br>` +
+    `입찰가율 70% 미만: <span style="color:var(--good)">${under70}건</span>`;
+}
+
+// ── 모달 ──
+function openModal(idx) {
+  const item = filtered[idx];
+  if (!item) return;
+  document.getElementById('modal-title').textContent = item.사건번호;
+  document.getElementById('modal-link').href = item.상세링크 || '#';
+
+  const fields = [
+    ['소재지', item.소재지],
+    ['감정가', item.감정가_표시 || fmt(item.감정가)],
+    ['최저입찰가', item.최저입찰가_표시 || fmt(item.최저입찰가)],
+    ['입찰가율', item.최저입찰가율 + '%'],
+    ['전용면적', item.전용면적 ? item.전용면적 + '㎡' : '-'],
+    ['층수', item.층수 || '-'],
+    ['유찰횟수', item.유찰횟수 !== undefined ? item.유찰횟수 + '회' : '-'],
+    ['매각기일', item.매각기일 || '-'],
+    ['진행상황', item.진행상황 || '-'],
+    ['수집시각', item.수집시각 || '-'],
+  ];
+
+  document.getElementById('modal-body').innerHTML = fields.map(([k,v]) =>
+    `<div class="modal-field"><label>${k}</label><div class="val">${v}</div></div>`
+  ).join('');
+
+  document.getElementById('modal-bg').classList.add('open');
+}
+
+function closeModal(e) {
+  if (!e || e.target === document.getElementById('modal-bg')) {
+    document.getElementById('modal-bg').classList.remove('open');
+  }
+}
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+// ── 유틸 ──
+function fmt(won) {
+  if (!won) return '-';
+  if (won >= 100000000) return (won/100000000).toFixed(1) + '억';
+  if (won >= 10000) return Math.round(won/10000) + '만';
+  return won.toLocaleString();
+}
+</script>
+</body>
+</html>
