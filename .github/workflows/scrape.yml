@@ -2,32 +2,34 @@ name: 경매 데이터 자동 수집
 
 on:
   schedule:
-    # 매일 오전 7시 (KST) = UTC 22:00 전날
-    - cron: '0 22 * * *'
-  workflow_dispatch:  # 수동 실행 버튼
+    - cron: '0 22 * * *'   # 매일 KST 07:00
+  workflow_dispatch:
 
 jobs:
   scrape:
     runs-on: ubuntu-latest
     permissions:
-      contents: write  # json 커밋 권한
+      contents: write
 
     steps:
-      - name: 레포 체크아웃
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Python 세팅
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
+      - name: Chrome 설치
+        run: |
+          wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+          sudo apt-get install -y ./google-chrome-stable_current_amd64.deb
+
       - name: 패키지 설치
-        run: pip install requests beautifulsoup4 lxml
+        run: pip install selenium beautifulsoup4 lxml webdriver-manager
 
       - name: 스크래퍼 실행
         run: python scraper.py --pages 5 --output docs/auction_data.json
 
-      - name: 수집 결과 커밋 & 푸시
+      - name: 결과 커밋 & 푸시
         run: |
           git config user.name  "auction-radar-bot"
           git config user.email "bot@auction-radar"
