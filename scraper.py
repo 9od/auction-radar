@@ -13,16 +13,27 @@ import json, time, re, argparse, os
 from datetime import datetime
 
 # ── 관심 지역 ───────────────────────────────────────────
-TARGET_AREAS = [
+# 수지/광교 지역
+SUJI_AREAS = [
     "성복동", "풍덕천동", "신봉동", "상현동",
     "광교", "이의동", "원천동",
-    "분당", "정자동", "수내동", "서현동", "야탑동",
-    "이매동", "금곡동", "구미동", "백현동", "삼평동",
 ]
+# 분당 지역 (준공연도 조건 미적용)
+BUNDANG_AREAS = [
+    "분당구", "정자동", "수내동", "미금동", "금정동",
+    "서현동", "야탑동", "이매동", "금곡동", "구미동",
+    "백현동", "삼평동", "판교동", "운중동",
+]
+TARGET_AREAS = SUJI_AREAS + BUNDANG_AREAS
+
 MIN_AREA_M2    = 59.0
 MIN_BUILD_YEAR = datetime.now().year - 15
 SEARCH_URL     = "https://www.courtauction.go.kr/pgj/index.on?w2xPath=/pgj/ui/pgj100/PGJ151F00.xml"
 COURTS         = ["수원지방법원", "성남지원"]
+
+def is_bundang(addr):
+    """분당 지역 여부 — 준공연도 조건 면제"""
+    return any(kw in addr for kw in BUNDANG_AREAS)
 
 # ── 실제 확인된 select/button ID ────────────────────────
 ID_COURT = "mf_wfm_mainFrame_sbx_rletCortOfc"
@@ -278,10 +289,14 @@ def scrape_court(driver, court_name, pages=10):
 def final_filter(items, max_price, min_price, max_rate):
     result, skip = [], {"면적": 0, "연도": 0, "가격": 0}
     for item in items:
+        # 면적 조건 (공통)
         if item["전용면적"] is not None and item["전용면적"] < MIN_AREA_M2:
             skip["면적"] += 1; continue
-        if item["준공연도"] is not None and item["준공연도"] < MIN_BUILD_YEAR:
-            skip["연도"] += 1; continue
+        # 준공연도 조건 — 분당 지역은 면제
+        if not is_bundang(item["소재지"]):
+            if item["준공연도"] is not None and item["준공연도"] < MIN_BUILD_YEAR:
+                skip["연도"] += 1; continue
+        # 가격 조건 (공통)
         if max_price and item["최저입찰가"] > max_price:
             skip["가격"] += 1; continue
         if min_price and item["최저입찰가"] < min_price:
