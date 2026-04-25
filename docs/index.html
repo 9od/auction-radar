@@ -467,13 +467,13 @@
         <div>
           <label>평형 (공급기준)</label>
           <div class="range-row">
-            <input type="number" id="minPyeong" placeholder="최소" step="1" value="30">
+            <input type="number" id="minPyeong" placeholder="최소" step="1">
             <input type="number" id="maxPyeong" placeholder="최대" step="1">
           </div>
         </div>
         <div>
           <label>준공연도 (이후)</label>
-          <input type="number" id="minBuildYear" placeholder="예: 2011" value="2011">
+          <input type="number" id="minBuildYear" placeholder="예: 2011">
         </div>
         <div>
           <label>진행 상황</label>
@@ -595,12 +595,13 @@ async function loadData() {
       `수집일시<br><span style="color:var(--text)">${json.수집일시 || '-'}</span><br>` +
       `총건수<br><span style="color:var(--text)">${json.총건수 || rawData.length}건</span><br>` +
       `기준<br><span style="color:var(--accent2)">${cond['준공기준'] || '-'} · ${cond['최소전용'] || '-'}</span>`;
-    applyFilters();
     document.getElementById('table-wrap').style.display = 'block';
     document.getElementById('empty-state').style.display = 'none';
     document.getElementById('summary-grid').style.display = 'grid';
     document.getElementById('sidebar-stats').style.display = 'block';
+    try { applyFilters(); } catch(err) { console.error('필터오류:', err); renderTable(); renderSummary(); }
   } catch (e) {
+    console.error('loadData 오류:', e);
     statusEl.innerHTML = `<span style="color:var(--warn)">데이터 없음<br>Actions 첫 실행 필요</span>`;
     document.getElementById('empty-state').style.display = 'block';
   }
