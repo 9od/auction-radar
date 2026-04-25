@@ -583,7 +583,8 @@ async function loadData() {
   statusEl.textContent = '로딩 중...';
   statusEl.style.color = 'var(--muted)';
   try {
-    const res = await fetch('auction_data.json?t=' + Date.now());
+    const base = location.pathname.replace(/\/[^/]*$/, '/');
+    const res = await fetch(base + 'auction_data.json?t=' + Date.now());
     if (!res.ok) throw new Error('파일 없음');
     const json = await res.json();
     rawData = json.items || [];
