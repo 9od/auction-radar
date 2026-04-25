@@ -153,7 +153,34 @@ def get_current_page(driver):
     except:
         return 1
 
-def scrape_court(driver, court_name, pages=5):
+def get_current_page(driver):
+    try:
+        active = driver.find_element(By.CSS_SELECTOR, ".w2pageList_label_selected")
+        return int(active.text.strip())
+    except:
+        return 1
+
+def get_total_pages(driver):
+    try:
+        labels = driver.find_elements(By.CSS_SELECTOR, ".w2pageList_control_label")
+        nums = [int(l.text.strip()) for l in labels if l.text.strip().isdigit()]
+        return max(nums) if nums else 1
+    except:
+        return 1
+
+def get_total_count(driver):
+    try:
+        tables = driver.find_elements(By.CSS_SELECTOR, "table")
+        if tables:
+            text = tables[0].text
+            m = re.search(r"총\s*물건수\s*(\d+)건", text)
+            if m:
+                return int(m.group(1))
+    except:
+        pass
+    return 0
+
+def scrape_court(driver, court_name, pages=10):
     wait = WebDriverWait(driver, 20)
     print(f"\n▶ [{court_name}] 수집 시작")
 
@@ -192,7 +219,12 @@ def scrape_court(driver, court_name, pages=5):
     all_items  = []
     seen_cases = set()
 
-    for page in range(1, pages + 1):
+    # 실제 총 페이지 수 파악
+    total_count = get_total_count(driver)
+    total_pages = min(get_total_pages(driver), pages)
+    print(f"  총 {total_count}건 / {total_pages}페이지 수집 예정")
+
+    for page in range(1, total_pages + 1):
         print(f"  {page}p 파싱...", end=" ", flush=True)
         time.sleep(2)
 
@@ -205,39 +237,40 @@ def scrape_court(driver, court_name, pages=5):
         print(f"전체 {len(items)}건 → 지역매칭 {len(matched)}건")
         all_items.extend(matched)
 
-        if page >= pages:
+        if page >= total_pages:
             break
 
-        # 다음 페이지 이동
+        # 다음 페이지 이동 — .w2pageList_control_label 중 숫자 텍스트로 클릭
         moved = False
         try:
+            next_num = str(page + 1)
             labels = driver.find_elements(By.CSS_SELECTOR, ".w2pageList_control_label")
             for label in labels:
-                if label.text.strip() == str(page + 1):
+                if label.text.strip() == next_num:
                     driver.execute_script("arguments[0].click();", label)
                     time.sleep(3)
-                    moved = True
+                    # 실제 이동 확인
+                    cur = get_current_page(driver)
+                    if cur == page + 1:
+                        moved = True
                     break
-        except:
-            pass
+        except Exception as e:
+            print(f"  [경고] 페이지이동 오류: {e}")
 
         if not moved:
+            # next 버튼 시도
             try:
                 next_btn = driver.find_element(By.CSS_SELECTOR, ".w2pageList_col_next")
                 driver.execute_script("arguments[0].click();", next_btn)
                 time.sleep(3)
-                moved = True
+                cur = get_current_page(driver)
+                if cur == page + 1:
+                    moved = True
             except:
                 pass
 
         if not moved:
-            print("  → 마지막 페이지")
-            break
-
-        # 페이지 이동 검증
-        cur = get_current_page(driver)
-        if cur != page + 1:
-            print(f"  → 페이지 고착 (현재:{cur}), 종료")
+            print(f"  → 마지막 페이지 (총 {page}p)")
             break
 
     return all_items
