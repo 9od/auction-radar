@@ -520,7 +520,7 @@
       </div>
     </div>
 
-    <div id="empty-state" class="empty-state">
+    <div id="empty-state" class="empty-state" style="display:none">
       <div class="empty-icon">🏢</div>
       <div class="empty-title">데이터 수집 전입니다</div>
       <div class="empty-desc">
@@ -597,6 +597,7 @@ async function loadData() {
       `기준<br><span style="color:var(--accent2)">${cond['준공기준'] || '-'} · ${cond['최소전용'] || '-'}</span>`;
     document.getElementById('table-wrap').style.display = 'block';
     document.getElementById('empty-state').style.display = 'none';
+    document.getElementById('empty-state').hidden = true;
     document.getElementById('summary-grid').style.display = 'grid';
     document.getElementById('sidebar-stats').style.display = 'block';
     try { applyFilters(); } catch(err) { console.error('필터오류:', err); renderTable(); renderSummary(); }
