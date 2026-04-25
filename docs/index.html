@@ -716,12 +716,12 @@ function renderSummary() {
   document.getElementById('s-min-price').textContent = fmt(minPrice);
 
   // 사이드바 통계
-  const신건 = filtered.filter(i => i.진행상황.includes('신건')).length;
-  const유찰 = filtered.filter(i => i.진행상황.includes('유찰')).length;
-  const under70 = filtered.filter(i => i.최저입찰가율 < 70).length;
+  const cntNew   = filtered.filter(i => i.진행상황.includes('신건')).length;
+  const cntFail  = filtered.filter(i => i.진행상황.includes('유찰')).length;
+  const under70  = filtered.filter(i => i.최저입찰가율 < 70).length;
   document.getElementById('stats-content').innerHTML =
-    `신건: <span style="color:var(--good)">${신건}건</span><br>` +
-    `유찰: <span style="color:var(--warn)">${유찰}건</span><br>` +
+    `신건: <span style="color:var(--good)">${cntNew}건</span><br>` +
+    `유찰: <span style="color:var(--warn)">${cntFail}건</span><br>` +
     `입찰가율 70% 미만: <span style="color:var(--good)">${under70}건</span>`;
 }
 
