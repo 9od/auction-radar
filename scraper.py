@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
 """
-법원경매 아파트 스크래퍼 v3 — WebSquare 구조 정확 반영
-실제 사이트 구조:
-  - URL: /pgj/index.on?w2xPath=/pgj/ui/pgj100/PGJ151F00.xml
-  - iframe 없음 (단일 페이지)
-  - 홀수행: 사건번호/소재지/감정가/매각기일
-  - 짝수행: 용도/최저매각가격(입찰가율%)/진행상태
-  - 페이지네이션: .w2pageList_col_next 버튼
+법원경매 아파트 스크래퍼 v4
+- 중복 제거
+- 최저입찰가 파싱 버그 수정
+- 페이지 이동 방식 개선
 """
 
 from selenium import webdriver
@@ -14,12 +11,11 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait, Select
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.common.action_chains import ActionChains
 from bs4 import BeautifulSoup
 import json, time, re, argparse, os
 from datetime import datetime
 
-# ── 창민님 관심 지역 ────────────────────────────────────
+# ── 관심 지역 ───────────────────────────────────────────
 TARGET_AREAS = [
     "성복동", "풍덕천동", "신봉동", "상현동",
     "광교", "이의동", "원천동",
@@ -28,11 +24,10 @@ TARGET_AREAS = [
 ]
 MIN_AREA_M2    = 59.0
 MIN_BUILD_YEAR = datetime.now().year - 15
+SEARCH_URL     = "https://www.courtauction.go.kr/pgj/index.on?w2xPath=/pgj/ui/pgj100/PGJ151F00.xml"
+COURTS         = ["수원지방법원", "성남지원"]
 
-SEARCH_URL = "https://www.courtauction.go.kr/pgj/index.on?w2xPath=/pgj/ui/pgj100/PGJ151F00.xml"
-
-COURTS = ["수원지방법원", "성남지원"]
-
+# ── 유틸 ────────────────────────────────────────────────
 def m2_to_pyeong(m2):
     return round(m2 / 3.305785, 1) if m2 else None
 
@@ -58,24 +53,22 @@ def make_driver():
     opts.add_argument("--disable-dev-shm-usage")
     opts.add_argument("--disable-gpu")
     opts.add_argument("--window-size=1400,900")
-    opts.add_argument("--lang=ko-KR")
     opts.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36")
     return webdriver.Chrome(options=opts)
 
+# ── 테이블 파싱 ─────────────────────────────────────────
 def parse_table(driver):
-    """현재 페이지에서 홀수/짝수 행 쌍으로 데이터 파싱"""
-    soup = BeautifulSoup(driver.page_source, "lxml")
+    soup  = BeautifulSoup(driver.page_source, "lxml")
     tables = soup.select("table")
     if len(tables) < 2:
         return []
 
-    rows = tables[1].select("tbody tr")
+    rows  = tables[1].select("tbody tr")
     items = []
-
     i = 0
-    while i < len(rows) - 1:
+    while i < len(rows):
         odd  = rows[i]
-        even = rows[i + 1] if i + 1 < len(rows) else None
+        even = rows[i+1] if i+1 < len(rows) else None
         i += 2
 
         odd_cells  = odd.select("td")
@@ -84,46 +77,42 @@ def parse_table(driver):
         if len(odd_cells) < 6:
             continue
 
-        # 홀수행 파싱
         try:
-            addr_raw   = odd_cells[3].get_text(" ", strip=True)
-            감정가_raw  = odd_cells[6].get_text(strip=True) if len(odd_cells) > 6 else ""
-            매각기일_raw = odd_cells[7].get_text(strip=True) if len(odd_cells) > 7 else ""
-            case_no    = odd_cells[1].get_text(strip=True).replace("\n", " ")
+            addr_raw    = odd_cells[3].get_text(" ", strip=True)
+            감정가_raw   = odd_cells[6].get_text(strip=True) if len(odd_cells) > 6 else ""
+            매각기일_raw  = odd_cells[7].get_text(strip=True) if len(odd_cells) > 7 else ""
+            case_no     = odd_cells[1].get_text(strip=True).replace("\n", " ")
 
-            # 사건번호 링크에서 index 추출 (moveDtlPage용)
-            case_link = odd.select_one("a[onclick*='moveDtlPage']")
-            move_idx  = ""
-            if case_link:
-                m = re.search(r"moveDtlPage\((\d+)\)", case_link.get("onclick",""))
-                if m: move_idx = m.group(1)
+            용도         = even_cells[0].get_text(strip=True) if even_cells else ""
+            최저가_raw   = even_cells[1].get_text(strip=True) if len(even_cells) > 1 else ""
+            진행상황     = even_cells[2].get_text(strip=True) if len(even_cells) > 2 else ""
 
-            # 짝수행 파싱 (용도 / 최저매각가격 / 진행상태)
-            용도     = even_cells[0].get_text(strip=True) if even_cells else ""
-            최저가_raw = even_cells[1].get_text(strip=True) if len(even_cells) > 1 else ""
-            진행상황  = even_cells[2].get_text(strip=True) if len(even_cells) > 2 else ""
+            # ── 최저매각가격 파싱 (핵심 버그 수정) ──
+            # 원본 예시: "277,830,000\n(49%)"
+            # 숫자만 추출 (쉼표 포함, % 제외)
+            price_only  = re.sub(r"\(.*?\)", "", 최저가_raw).strip()  # (49%) 제거
+            최저가       = safe_int(price_only)
+            감정가       = safe_int(감정가_raw)
 
-            # 최저매각가격 숫자 + 입찰가율 분리
-            최저가    = safe_int(최저가_raw)
-            감정가    = safe_int(감정가_raw)
-            rate_m = re.search(r"\((\d+)%\)", 최저가_raw)
-            입찰가율 = float(rate_m.group(1)) if rate_m else (
+            # 입찰가율: 괄호 안 % 우선, 없으면 계산
+            rate_m      = re.search(r"\((\d+)%\)", 최저가_raw)
+            입찰가율     = float(rate_m.group(1)) if rate_m else (
                 round(최저가 / 감정가 * 100, 1) if 감정가 > 0 else 0
             )
 
-            # 면적 추출
-            area_m  = re.search(r"([\d.]+)\s*㎡", addr_raw)
-            전용면적 = float(area_m.group(1)) if area_m else None
-            평형     = m2_to_pyeong(전용면적)
+            # 면적 (소재지 텍스트에서)
+            area_m      = re.search(r"([\d.]+)\s*㎡", addr_raw)
+            전용면적     = float(area_m.group(1)) if area_m else None
+            평형         = m2_to_pyeong(전용면적)
 
             # 유찰횟수
-            fail_m   = re.search(r"유찰\s*(\d+)\s*회", 진행상황)
-            유찰횟수 = int(fail_m.group(1)) if fail_m else 0
+            fail_m      = re.search(r"유찰\s*(\d+)\s*회", 진행상황)
+            유찰횟수     = int(fail_m.group(1)) if fail_m else 0
 
             item = {
                 "사건번호":       case_no,
                 "소재지":        addr_raw,
-                "용도":         용도,
+                "용도":          용도,
                 "감정가":        감정가,
                 "최저입찰가":     최저가,
                 "최저입찰가율":   입찰가율,
@@ -132,22 +121,37 @@ def parse_table(driver):
                 "매각기일":      매각기일_raw.replace("\n", " "),
                 "진행상황":      진행상황,
                 "전용면적":      전용면적,
-                "평형":         평형,
-                "층수":         None,
+                "평형":          평형,
+                "층수":          None,
                 "준공연도":      None,
                 "건축연수":      None,
                 "유찰횟수":      유찰횟수,
-                "단지명":        None,
-                "move_idx":      move_idx,
                 "수집시각":      datetime.now().strftime("%Y-%m-%d %H:%M"),
             }
             items.append(item)
         except Exception as e:
-            print(f"    [파싱오류] {e}")
             continue
 
     return items
 
+# ── 현재 페이지 번호 확인 ────────────────────────────────
+def get_current_page(driver):
+    try:
+        active = driver.find_element(By.CSS_SELECTOR, ".w2pageList_label_selected")
+        return int(active.text.strip())
+    except:
+        return 1
+
+# ── 총 페이지 수 확인 ────────────────────────────────────
+def get_total_pages(driver):
+    try:
+        labels = driver.find_elements(By.CSS_SELECTOR, ".w2pageList_control_label")
+        nums   = [int(l.text.strip()) for l in labels if l.text.strip().isdigit()]
+        return max(nums) if nums else 1
+    except:
+        return 1
+
+# ── 법원별 수집 ─────────────────────────────────────────
 def scrape_court(driver, court_name, pages=5):
     wait = WebDriverWait(driver, 20)
     print(f"\n▶ [{court_name}] 수집 시작")
@@ -155,157 +159,96 @@ def scrape_court(driver, court_name, pages=5):
     driver.get(SEARCH_URL)
     time.sleep(3)
 
+    # 법원 선택 — select 전체 순회
     try:
-        # 법원 선택
-        court_sel = wait.until(EC.presence_of_element_located(
-            (By.CSS_SELECTOR, "select[id*='crtNm'], select[id*='cortNm'], select[id*='jiwonNm']")
-        ))
-        Select(court_sel).select_by_visible_text(court_name)
-        time.sleep(1)
-    except Exception as e:
-        print(f"  [경고] 법원 선택 실패 — ID로 재시도: {e}")
-        try:
-            selects = driver.find_elements(By.TAG_NAME, "select")
-            for s in selects:
-                opts = [o.text for o in Select(s).options]
-                if court_name in opts:
-                    Select(s).select_by_visible_text(court_name)
-                    time.sleep(1)
-                    break
-        except Exception as e2:
-            print(f"  [오류] 법원 선택 완전 실패: {e2}")
-
-    try:
-        # 대분류: 건물
-        selects = driver.find_elements(By.TAG_NAME, "select")
-        for s in selects:
+        for s in driver.find_elements(By.TAG_NAME, "select"):
             opts = [o.text for o in Select(s).options]
-            if "건물" in opts and "토지" in opts:
-                Select(s).select_by_visible_text("건물")
-                time.sleep(1.5)
-                break
-
-        # 중분류: 주거용건물
-        selects = driver.find_elements(By.TAG_NAME, "select")
-        for s in selects:
-            opts = [o.text for o in Select(s).options]
-            if "주거용건물" in opts:
-                Select(s).select_by_visible_text("주거용건물")
-                time.sleep(1.5)
-                break
-
-        # 소분류: 아파트
-        selects = driver.find_elements(By.TAG_NAME, "select")
-        for s in selects:
-            opts = [o.text for o in Select(s).options]
-            if "아파트" in opts:
-                Select(s).select_by_visible_text("아파트")
+            if court_name in opts:
+                Select(s).select_by_visible_text(court_name)
                 time.sleep(1)
                 break
+    except Exception as e:
+        print(f"  [경고] 법원 선택 실패: {e}")
+
+    # 대분류 → 중분류 → 소분류
+    try:
+        for keyword, label in [("건물", "대분류"), ("주거용건물", "중분류"), ("아파트", "소분류")]:
+            time.sleep(1.2)
+            for s in driver.find_elements(By.TAG_NAME, "select"):
+                opts = [o.text for o in Select(s).options]
+                if keyword in opts:
+                    Select(s).select_by_visible_text(keyword)
+                    break
     except Exception as e:
         print(f"  [경고] 분류 선택 오류: {e}")
 
     # 검색 버튼
     try:
-        search_btns = driver.find_elements(By.CSS_SELECTOR,
-            "button[id*='btn_search'], input[value='검색'], button.btn_search"
-        )
-        if not search_btns:
-            search_btns = [b for b in driver.find_elements(By.TAG_NAME, "button")
-                           if "검색" in b.text or "search" in b.get_attribute("id","").lower()]
-        if search_btns:
-            search_btns[0].click()
-        else:
-            # JS로 검색 함수 직접 호출 시도
-            driver.execute_script("fn_search ? fn_search() : search()")
+        btns = driver.find_elements(By.TAG_NAME, "button")
+        search_btn = next((b for b in btns if "검색" in b.text), None)
+        if search_btn:
+            driver.execute_script("arguments[0].click();", search_btn)
         time.sleep(4)
     except Exception as e:
-        print(f"  [오류] 검색 버튼 클릭 실패: {e}")
+        print(f"  [오류] 검색 실패: {e}")
         return []
 
-    all_items = []
+    all_items  = []
+    seen_cases = set()  # 중복 제거용
 
-    for page in range(1, pages + 1):
+    total_pages = min(get_total_pages(driver), pages)
+
+    for page in range(1, total_pages + 1):
         print(f"  {page}p 파싱...", end=" ", flush=True)
-        try:
-            time.sleep(2)
-            items = parse_table(driver)
-            matched = [i for i in items if is_target(i["소재지"])]
-            print(f"전체 {len(items)}건 → 지역매칭 {len(matched)}건")
-            all_items.extend(matched)
+        time.sleep(2)
 
-            if page < pages:
-                # 다음 페이지 버튼
+        items   = parse_table(driver)
+        matched = [i for i in items
+                   if is_target(i["소재지"]) and i["사건번호"] not in seen_cases]
+
+        for item in matched:
+            seen_cases.add(item["사건번호"])
+
+        print(f"전체 {len(items)}건 → 지역매칭 {len(matched)}건")
+        all_items.extend(matched)
+
+        # 다음 페이지 이동
+        if page < total_pages:
+            moved = False
+            try:
+                # 페이지 번호 직접 클릭
+                labels = driver.find_elements(By.CSS_SELECTOR, ".w2pageList_control_label")
+                for label in labels:
+                    if label.text.strip() == str(page + 1):
+                        driver.execute_script("arguments[0].click();", label)
+                        time.sleep(3)
+                        moved = True
+                        break
+            except:
+                pass
+
+            if not moved:
                 try:
                     next_btn = driver.find_element(By.CSS_SELECTOR, ".w2pageList_col_next")
                     driver.execute_script("arguments[0].click();", next_btn)
-                    time.sleep(2.5)
+                    time.sleep(3)
+                    moved = True
                 except:
-                    # 페이지 번호 클릭
-                    try:
-                        page_links = driver.find_elements(By.CSS_SELECTOR, ".w2pageList_control_label")
-                        target = [l for l in page_links if l.text.strip() == str(page+1)]
-                        if target:
-                            driver.execute_script("arguments[0].click();", target[0])
-                            time.sleep(2.5)
-                        else:
-                            print("  → 마지막 페이지")
-                            break
-                    except:
-                        print("  → 페이지 이동 실패")
-                        break
-        except Exception as e:
-            print(f"  [오류] {e}")
-            break
+                    pass
+
+            if not moved:
+                print("  → 다음 페이지 이동 실패, 종료")
+                break
+
+            # 페이지 실제로 이동됐는지 확인
+            cur = get_current_page(driver)
+            if cur != page + 1:
+                print(f"  → 페이지 이동 안됨 (현재:{cur}), 종료")
+                break
 
     return all_items
 
-def fetch_detail(driver, item):
-    """상세 페이지에서 준공연도, 층수, 단지명 수집"""
-    try:
-        # moveDtlPage JS 함수 직접 호출
-        if item.get("move_idx"):
-            driver.execute_script(f"moveDtlPage({item['move_idx']})")
-            time.sleep(3)
-        else:
-            return {}
-
-        soup = BeautifulSoup(driver.page_source, "lxml")
-        text = soup.get_text(" ", strip=True)
-        d = {}
-
-        # 준공연도
-        for pat in [
-            r"사용\s*승인\s*[：:]?\s*(\d{4})[.\-년]",
-            r"준공\s*[：:]?\s*(\d{4})[.\-년]",
-            r"(\d{4})년\s*\d{1,2}월\s*사용승인",
-        ]:
-            m = re.search(pat, text)
-            if m:
-                yr = int(m.group(1))
-                if 1970 <= yr <= datetime.now().year:
-                    d["준공연도"]  = yr
-                    d["건축연수"] = datetime.now().year - yr
-                    break
-
-        # 층수
-        m = re.search(r"(\d+)\s*층\s*/\s*(\d+)\s*층", text)
-        if m: d["층수"] = f"{m.group(1)}층/{m.group(2)}층"
-
-        # 단지명
-        m = re.search(r"([가-힣A-Za-z0-9\s]{2,15}아파트)", text[:500])
-        if m: d["단지명"] = m.group(1).strip()
-
-        # 뒤로가기
-        driver.back()
-        time.sleep(2)
-
-        return d
-    except Exception as e:
-        try: driver.back(); time.sleep(2)
-        except: pass
-        return {}
-
+# ── 필터 ────────────────────────────────────────────────
 def final_filter(items, max_price, min_price, max_rate):
     result, skip = [], {"면적": 0, "연도": 0, "가격": 0}
     for item in items:
@@ -322,50 +265,46 @@ def final_filter(items, max_price, min_price, max_rate):
         result.append(item)
     return result, skip
 
+# ── 메인 ────────────────────────────────────────────────
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--pages",     type=int,   default=5)
     parser.add_argument("--max-price", type=int,   default=None)
     parser.add_argument("--min-price", type=int,   default=None)
     parser.add_argument("--max-rate",  type=float, default=None)
-    parser.add_argument("--no-detail", action="store_true")
     parser.add_argument("--output",    default="docs/auction_data.json")
     args = parser.parse_args()
 
     print(f"\n{'━'*52}")
-    print(f"  경매레이더 v3 — 수지/광교/분당 아파트")
+    print(f"  경매레이더 v4 — 수지/광교/분당 아파트")
     print(f"  면적: {MIN_AREA_M2}㎡↑ | 준공: {MIN_BUILD_YEAR}년↑")
     print(f"{'━'*52}")
 
-    driver = make_driver()
+    driver      = make_driver()
     all_matched = []
 
     try:
         for court in COURTS:
             matched = scrape_court(driver, court, pages=args.pages)
-
-            if not args.no_detail and matched:
-                print(f"\n  📋 상세 수집 ({len(matched)}건)")
-                # 상세 수집 전 검색 결과 페이지로 복귀해야 moveDtlPage 동작
-                # 각 항목별로 검색 → 상세 클릭 방식 대신
-                # 소재지 텍스트로 준공연도 패턴 추출 (이미 있는 경우)
-                for item in matched:
-                    area_text = item.get("소재지", "")
-                    # 면적은 소재지에 이미 포함되어 있음
-                    # 준공연도만 상세에서 추가 수집 필요 → no-detail 기본 권장
-                    pass
-
             all_matched.extend(matched)
     finally:
         driver.quit()
 
-    filtered, skip = final_filter(all_matched, args.max_price, args.min_price, args.max_rate)
+    # 전체 중복 제거 (두 법원에서 겹치는 경우)
+    seen  = set()
+    dedup = []
+    for item in all_matched:
+        if item["사건번호"] not in seen:
+            seen.add(item["사건번호"])
+            dedup.append(item)
+
+    filtered, skip = final_filter(dedup, args.max_price, args.min_price, args.max_rate)
     filtered.sort(key=lambda x: x["최저입찰가율"])
 
     print(f"\n{'─'*52}")
-    print(f"  지역 매칭 합계  : {len(all_matched)}건")
-    print(f"  면적 미달 제외  : {skip['면적']}건 (<{MIN_AREA_M2}㎡)")
-    print(f"  준공연도 제외   : {skip['연도']}건 (<{MIN_BUILD_YEAR}년)")
+    print(f"  지역 매칭 합계  : {len(dedup)}건")
+    print(f"  면적 미달 제외  : {skip['면적']}건")
+    print(f"  준공연도 제외   : {skip['연도']}건")
     print(f"  ✅ 최종 결과    : {len(filtered)}건")
     print(f"{'─'*52}\n")
 
@@ -389,12 +328,11 @@ def main():
     if filtered:
         print("\n─── TOP 10 (입찰가율 낮은 순) ───")
         for item in filtered[:10]:
-            area  = f"{item['전용면적']}㎡({item['평형']}평)" if item.get("전용면적") else "면적미상"
-            year  = f"{item['준공연도']}년({item['건축연수']}년차)" if item.get("준공연도") else ""
-            fail  = f" | 유찰 {item['유찰횟수']}회" if item.get("유찰횟수") else ""
+            area = f"{item['전용면적']}㎡({item['평형']}평)" if item.get("전용면적") else "면적미상"
+            fail = f" | 유찰 {item['유찰횟수']}회" if item.get("유찰횟수") else ""
             print(f"\n  {item['사건번호']}")
             print(f"  📍 {item['소재지'][:50]}")
-            print(f"  🏠 {area} {year}")
+            print(f"  🏠 {area}")
             print(f"  💰 {item['감정가_표시']} → {item['최저입찰가_표시']} ({item['최저입찰가율']}%){fail}")
             print(f"  📅 {item['매각기일']} | {item['진행상황']}")
     else:
