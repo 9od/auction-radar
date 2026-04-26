@@ -699,7 +699,9 @@ function renderTable() {
         <td style="text-align:center"><span class="rate-pill ${rateClass}">${item.최저입찰가율}%</span>${fail}</td>
         <td style="font-size:12px;white-space:nowrap">${item.매각기일 || '-'}</td>
         <td><span class="status-tag ${statusClass}">${item.진행상황 || '-'}</span></td>
-        <td>${item.상세링크 ? `<a class="link-btn" href="${item.상세링크}" target="_blank" onclick="event.stopPropagation()">보기</a>` : ''}</td>
+        <td style="white-space:nowrap">
+          <a class="link-btn" href="#" onclick="openMap(event, '${item.소재지.replace(/'/g,"\\'").replace(/\n/g,' ')}')">🗺 지도</a>
+        </td>
       </tr>`;
   }).join('');
 }
@@ -751,6 +753,56 @@ function openModal(idx) {
   ).join('');
 
   document.getElementById('modal-bg').classList.add('open');
+}
+
+// ── 지도 열기 ──
+function openMap(e, addr) {
+  e.stopPropagation();
+  e.preventDefault();
+
+  // 주소에서 핵심 부분 추출 ([ 이후 건물 정보 제거)
+  const cleanAddr = addr.replace(/\[.*/, '').replace(/\n/g, ' ').trim();
+
+  // 지도 선택 팝업
+  const existing = document.getElementById('map-popup');
+  if (existing) existing.remove();
+
+  const popup = document.createElement('div');
+  popup.id = 'map-popup';
+  popup.style.cssText = `
+    position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+    background:var(--card); border:1px solid var(--border); border-radius:12px;
+    padding:24px; z-index:300; min-width:280px; box-shadow:0 8px 32px rgba(0,0,0,0.5);
+  `;
+  popup.innerHTML = `
+    <div style="font-size:13px;font-weight:500;margin-bottom:6px;color:var(--text)">지도에서 보기</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:16px;line-height:1.5">${cleanAddr}</div>
+    <div style="display:flex;flex-direction:column;gap:8px;">
+      <a href="https://map.kakao.com/link/search/${encodeURIComponent(cleanAddr)}" target="_blank"
+         style="display:block;padding:10px 16px;background:#FAE100;color:#3C1E1E;border-radius:8px;text-decoration:none;font-size:13px;font-weight:500;text-align:center;">
+        🟡 카카오맵
+      </a>
+      <a href="https://map.naver.com/p/search/${encodeURIComponent(cleanAddr)}" target="_blank"
+         style="display:block;padding:10px 16px;background:#03C75A;color:#fff;border-radius:8px;text-decoration:none;font-size:13px;font-weight:500;text-align:center;">
+        🟢 네이버지도
+      </a>
+      <a href="https://www.google.com/maps/search/${encodeURIComponent(cleanAddr)}" target="_blank"
+         style="display:block;padding:10px 16px;background:#4285F4;color:#fff;border-radius:8px;text-decoration:none;font-size:13px;font-weight:500;text-align:center;">
+        🔵 구글맵
+      </a>
+      <button onclick="document.getElementById('map-popup').remove()"
+        style="padding:8px;background:none;border:1px solid var(--border);border-radius:8px;color:var(--muted);cursor:pointer;font-size:12px;margin-top:4px;">
+        닫기
+      </button>
+    </div>
+  `;
+
+  // 팝업 외부 클릭 시 닫기
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:299;';
+  overlay.onclick = () => { popup.remove(); overlay.remove(); };
+  document.body.appendChild(overlay);
+  document.body.appendChild(popup);
 }
 
 function closeModal(e) {
