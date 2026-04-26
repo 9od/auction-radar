@@ -415,13 +415,64 @@
   /* ── 반응형 ── */
   @media (max-width: 900px) {
     .layout { grid-template-columns: 1fr; }
-    aside { border-right: none; border-bottom: 1px solid var(--border); }
+    aside { border-right: none; border-bottom: 1px solid var(--border); padding: 14px; }
     .summary-grid { grid-template-columns: repeat(2, 1fr); }
-    .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-    table { min-width: 700px; }
-    .sort-controls { display: none; }
     main { padding: 12px; }
     .modal { width: 95vw; padding: 20px; }
+    .table-wrap { display: none; }
+    .card-list { display: flex !important; }
+  }
+
+  /* ── 모바일 카드 리스트 ── */
+  .card-list {
+    display: none;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .auction-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    cursor: pointer;
+    transition: border-color .15s;
+  }
+  .auction-card:hover { border-color: var(--accent); }
+  .card-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  .card-case { font-family: var(--mono); font-size: 10px; color: var(--accent2); }
+  .card-addr { font-size: 13px; font-weight: 500; line-height: 1.4; margin-bottom: 4px; }
+  .card-sub { font-size: 11px; color: var(--muted); line-height: 1.6; }
+  .card-bottom {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .card-price { font-family: var(--mono); font-size: 13px; }
+  .card-price .appraisal { color: var(--muted); font-size: 11px; }
+  .card-price .min { color: var(--text); font-weight: 600; }
+  .card-actions { display: flex; gap: 6px; align-items: center; }
+  .card-date { font-size: 11px; color: var(--muted); }
+  .card-map-btn {
+    font-size: 12px;
+    background: rgba(59,130,246,0.1);
+    color: var(--accent);
+    border: 1px solid rgba(59,130,246,0.3);
+    padding: 5px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    text-decoration: none;
+    white-space: nowrap;
   }
 </style>
 </head>
@@ -561,6 +612,10 @@
         <tbody id="table-body"></tbody>
       </table>
     </div>
+
+    <!-- 모바일 카드 리스트 -->
+    <div class="card-list" id="card-list"></div>
+
   </main>
 </div>
 
@@ -677,13 +732,16 @@ function sortData() {
 // ── 렌더 ──
 function renderTable() {
   const tbody = document.getElementById('table-body');
+  const cardList = document.getElementById('card-list');
   document.getElementById('count-badge').textContent = `${filtered.length}건`;
 
   if (!filtered.length) {
     tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--muted)">조건에 맞는 물건이 없습니다</td></tr>`;
+    cardList.innerHTML = `<div style="text-align:center;padding:40px;color:var(--muted)">조건에 맞는 물건이 없습니다</div>`;
     return;
   }
 
+  // 데스크탑 테이블
   tbody.innerHTML = filtered.map((item, idx) => {
     const rateClass = item.최저입찰가율 < 70 ? 'rate-low' : item.최저입찰가율 < 90 ? 'rate-mid' : 'rate-high';
     const statusClass = item.진행상황.includes('신건') ? 'status-new' : item.진행상황.includes('유찰') ? 'status-fail' : 'status-etc';
@@ -694,7 +752,7 @@ function renderTable() {
       ? `<br><span style="font-size:10px;color:var(--accent2)">${item.준공연도}년 (${item.건축연수}년차)</span>`
       : '';
     const fail = item.유찰횟수 ? `<br><span style="font-size:10px;color:var(--warn)">유찰 ${item.유찰횟수}회</span>` : '';
-
+    const addrEsc = (item.소재지||'').replace(/'/g,"\\'").replace(/\n/g,' ');
     return `
       <tr onclick="openModal(${idx})">
         <td><span class="case-num">${item.사건번호}</span></td>
@@ -705,9 +763,45 @@ function renderTable() {
         <td style="font-size:12px;white-space:nowrap">${item.매각기일 || '-'}</td>
         <td><span class="status-tag ${statusClass}">${item.진행상황 || '-'}</span></td>
         <td style="white-space:nowrap">
-          <a class="link-btn" href="#" onclick="openKakaoMap(event, '${item.소재지.replace(/'/g,"\\'").replace(/\n/g,' ')}')">🗺 지도</a>
+          <a class="link-btn" href="#" onclick="openKakaoMap(event, '${addrEsc}')">🗺 지도</a>
         </td>
       </tr>`;
+  }).join('');
+
+  // 모바일 카드
+  cardList.innerHTML = filtered.map((item, idx) => {
+    const rateClass = item.최저입찰가율 < 70 ? 'rate-low' : item.최저입찰가율 < 90 ? 'rate-mid' : 'rate-high';
+    const statusClass = item.진행상황.includes('신건') ? 'status-new' : item.진행상황.includes('유찰') ? 'status-fail' : 'status-etc';
+    const area = item.전용면적 ? `${item.전용면적}㎡(${item.평형}평)` : '';
+    const fail = item.유찰횟수 ? ` · 유찰 ${item.유찰횟수}회` : '';
+    const addrEsc = (item.소재지||'').replace(/'/g,"\\'").replace(/\n/g,' ');
+    // 주소에서 단지명 추출 (괄호 안)
+    const nameMatch = item.소재지.match(/\(([^)]+)\)/);
+    const aptName = nameMatch ? nameMatch[1].replace(/.*,/, '').trim() : item.소재지.split(' ').slice(0,5).join(' ');
+
+    return `
+      <div class="auction-card" onclick="openModal(${idx})">
+        <div class="card-top">
+          <div style="flex:1;min-width:0">
+            <div class="card-case">${item.사건번호}</div>
+            <div class="card-addr">${aptName}</div>
+            <div class="card-sub">${item.소재지.replace(/\[.*/, '').replace(/\n/g,' ').trim()}</div>
+            ${area ? `<div class="card-sub">${area}${item.층수 ? ' · '+item.층수 : ''}${fail}</div>` : ''}
+          </div>
+          <span class="rate-pill ${rateClass}" style="flex-shrink:0">${item.최저입찰가율}%</span>
+        </div>
+        <div class="card-bottom">
+          <div class="card-price">
+            <div class="appraisal">감정가 ${item.감정가_표시 || fmt(item.감정가)}</div>
+            <div class="min">최저 ${item.최저입찰가_표시 || fmt(item.최저입찰가)}</div>
+          </div>
+          <div class="card-actions">
+            <span class="card-date">${(item.매각기일||'').replace(/경매\d+계/,'').trim()}</span>
+            <span class="status-tag ${statusClass}">${item.진행상황}</span>
+            <a class="card-map-btn" href="#" onclick="openKakaoMap(event, '${addrEsc}')">🗺 지도</a>
+          </div>
+        </div>
+      </div>`;
   }).join('');
 }
 
