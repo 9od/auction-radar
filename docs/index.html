@@ -548,6 +548,10 @@
     <div class="filter-section" id="sidebar-stats" style="display:none">
       <h3>현황 요약</h3>
       <div id="stats-content" style="font-family:var(--mono);font-size:12px;line-height:2;color:var(--muted)"></div>
+      <div style="margin-top:10px;display:flex;flex-direction:column;gap:6px">
+        <button class="btn btn-secondary" onclick="toggleExcluded()" id="exclude-toggle-btn" style="font-size:11px">🚫 제외항목 포함해서 보기</button>
+        <button class="btn btn-secondary" onclick="clearExcluded()" style="font-size:11px;color:var(--danger)">제외목록 초기화</button>
+      </div>
     </div>
   </aside>
 
@@ -621,30 +625,69 @@
 
 <!-- 상세 모달 -->
 <div class="modal-bg" id="modal-bg" onclick="closeModal(event)">
-  <div class="modal" id="modal">
+  <div class="modal" id="modal" style="width:560px;max-width:95vw">
     <button class="modal-close" onclick="closeModal()">✕</button>
-    <h2 id="modal-title">물건 상세</h2>
+    <h2 id="modal-title" style="font-size:14px;margin-bottom:16px;padding-right:24px"></h2>
+
+    <!-- 기본 정보 -->
     <div class="modal-grid" id="modal-body"></div>
-    <div style="margin-top:20px">
-      <a id="modal-link" href="#" target="_blank" class="btn btn-primary" style="display:inline-block;text-decoration:none;text-align:center;padding:10px 20px;border-radius:6px;font-size:13px">법원경매 사이트에서 보기 →</a>
+
+    <!-- 메모 / 추천금액 -->
+    <div style="margin-top:18px;display:flex;flex-direction:column;gap:10px">
+      <div>
+        <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:5px">💡 AI 분석 메모</label>
+        <textarea id="memo-text" rows="4" placeholder="분석 내용을 입력하세요..."
+          style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:10px;font-size:12px;font-family:var(--sans);resize:vertical;outline:none;line-height:1.6"></textarea>
+      </div>
+      <div>
+        <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:5px">🎯 추천 입찰금액 (만원)</label>
+        <input id="memo-price" type="number" placeholder="예: 75000 (7억 5천만원)"
+          style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:9px 12px;font-size:13px;font-family:var(--mono);outline:none">
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button onclick="saveMemo()" class="btn btn-primary" style="flex:1;min-width:120px;font-size:13px">💾 메모 저장</button>
+        <button onclick="excludeItem()" id="exclude-btn" class="btn btn-secondary" style="flex:1;min-width:120px;font-size:13px">🚫 목록에서 제외</button>
+      </div>
     </div>
   </div>
 </div>
 
 <script>
-let rawData = [];
-let filtered = [];
-let sortKey = '최저입찰가율';
-let sortAsc = true;
+let rawData   = [];
+let filtered  = [];
+let sortKey   = '최저입찰가율';
+let sortAsc   = true;
+let showExcluded = false;
+let currentModalIdx = null;
 
-// ── 자동 데이터 로드 (GitHub Pages fetch) ──
+// ── localStorage 헬퍼 ──
+const LS_EXCLUDED = 'auction_excluded_v1';
+const LS_MEMOS    = 'auction_memos_v1';
+
+function getExcluded() {
+  try { return JSON.parse(localStorage.getItem(LS_EXCLUDED) || '[]'); } catch { return []; }
+}
+function setExcluded(arr) {
+  localStorage.setItem(LS_EXCLUDED, JSON.stringify(arr));
+}
+function getMemos() {
+  try { return JSON.parse(localStorage.getItem(LS_MEMOS) || '{}'); } catch { return {}; }
+}
+function setMemos(obj) {
+  localStorage.setItem(LS_MEMOS, JSON.stringify(obj));
+}
+
+// ── 자동 데이터 로드 ──
 async function loadData() {
   const statusEl = document.getElementById('refresh-status');
   statusEl.textContent = '로딩 중...';
   statusEl.style.color = 'var(--muted)';
   try {
     const base = location.pathname.replace(/\/[^/]*$/, '/');
-    const res = await fetch(base + 'auction_data.json?t=' + Date.now());
+    const res = await fetch(base + 'auction_data.json?t=' + Date.now(), {
+      cache: 'no-store',
+      headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate', 'Pragma': 'no-cache' }
+    });
     if (!res.ok) throw new Error('파일 없음');
     const json = await res.json();
     rawData = json.items || [];
@@ -669,22 +712,27 @@ async function loadData() {
 }
 
 window.addEventListener('DOMContentLoaded', loadData);
-
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') loadData();
+});
 
 // ── 필터 ──
 function applyFilters() {
-  const minPrice = (parseFloat(document.getElementById('minPrice').value) || 0) * 10000;
-  const maxPrice = (parseFloat(document.getElementById('maxPrice').value) || Infinity) * 10000;
-  const minRate      = parseFloat(document.getElementById('minRate').value) || 0;
-  const maxRate      = parseFloat(document.getElementById('maxRate').value) || 999;
-  const minArea      = parseFloat(document.getElementById('minArea').value) || 0;
-  const minPyeong    = parseFloat(document.getElementById('minPyeong').value) || 0;
-  const maxPyeong    = parseFloat(document.getElementById('maxPyeong').value) || 9999;
+  const minPrice    = (parseFloat(document.getElementById('minPrice').value) || 0) * 10000;
+  const maxPrice    = (parseFloat(document.getElementById('maxPrice').value) || Infinity) * 10000;
+  const minRate     = parseFloat(document.getElementById('minRate').value) || 0;
+  const maxRate     = parseFloat(document.getElementById('maxRate').value) || 999;
+  const minArea     = parseFloat(document.getElementById('minArea').value) || 0;
+  const minPyeong   = parseFloat(document.getElementById('minPyeong').value) || 0;
+  const maxPyeong   = parseFloat(document.getElementById('maxPyeong').value) || 9999;
   const minBuildYear = parseInt(document.getElementById('minBuildYear').value) || 0;
-  const addr         = document.getElementById('addrSearch').value.trim();
-  const status       = document.getElementById('statusFilter').value;
+  const addr        = document.getElementById('addrSearch').value.trim();
+  const status      = document.getElementById('statusFilter').value;
+  const excluded    = getExcluded();
 
   filtered = rawData.filter(item => {
+    // 제외 목록
+    if (!showExcluded && excluded.includes(item.사건번호)) return false;
     if (item.최저입찰가 < minPrice || item.최저입찰가 > maxPrice) return false;
     if (item.최저입찰가율 < minRate || item.최저입찰가율 > maxRate) return false;
     if (minArea && (item.전용면적 || 0) < minArea) return false;
@@ -702,13 +750,58 @@ function applyFilters() {
 }
 
 function resetFilters() {
-  ['minPrice','maxPrice','minRate','addrSearch','minArea'].forEach(id => document.getElementById(id).value = '');
+  ['minPrice','maxPrice','minRate','addrSearch','minArea','minPyeong','maxPyeong','minBuildYear'].forEach(id => {
+    document.getElementById(id).value = '';
+  });
   document.getElementById('maxRate').value = 100;
-  document.getElementById('minPyeong').value = 30;
-  document.getElementById('maxPyeong').value = '';
-  document.getElementById('minBuildYear').value = 2011;
   document.getElementById('statusFilter').value = '';
   applyFilters();
+}
+
+// ── 제외 기능 ──
+function excludeItem() {
+  if (currentModalIdx === null) return;
+  const item = filtered[currentModalIdx];
+  if (!item) return;
+  const excluded = getExcluded();
+  if (!excluded.includes(item.사건번호)) {
+    excluded.push(item.사건번호);
+    setExcluded(excluded);
+  }
+  closeModal();
+  applyFilters();
+}
+
+function toggleExcluded() {
+  showExcluded = !showExcluded;
+  const btn = document.getElementById('exclude-toggle-btn');
+  btn.textContent = showExcluded ? '🚫 제외항목 숨기기' : '🚫 제외항목 포함해서 보기';
+  btn.style.color = showExcluded ? 'var(--warn)' : '';
+  applyFilters();
+}
+
+function clearExcluded() {
+  if (!confirm('제외 목록을 모두 초기화할까요?')) return;
+  setExcluded([]);
+  applyFilters();
+}
+
+// ── 메모 저장 ──
+function saveMemo() {
+  if (currentModalIdx === null) return;
+  const item = filtered[currentModalIdx];
+  if (!item) return;
+  const memos = getMemos();
+  const text  = document.getElementById('memo-text').value.trim();
+  const price = document.getElementById('memo-price').value.trim();
+  memos[item.사건번호] = { text, price, savedAt: new Date().toLocaleString('ko-KR') };
+  setMemos(memos);
+  // 저장 피드백
+  const btn = document.querySelector('[onclick="saveMemo()"]');
+  const orig = btn.textContent;
+  btn.textContent = '✅ 저장됨';
+  setTimeout(() => { btn.textContent = orig; }, 1500);
+  renderTable(); // 메모 뱃지 갱신
 }
 
 // ── 정렬 ──
@@ -724,16 +817,18 @@ function sortBy(key) {
 function sortData() {
   filtered.sort((a, b) => {
     let av = a[sortKey] || 0, bv = b[sortKey] || 0;
-    if (typeof av === 'string') av = av.localeCompare(bv);
+    if (typeof av === 'string') return sortAsc ? av.localeCompare(bv) : bv.localeCompare(av);
     return sortAsc ? av - bv : bv - av;
   });
 }
 
 // ── 렌더 ──
 function renderTable() {
-  const tbody = document.getElementById('table-body');
+  const tbody    = document.getElementById('table-body');
   const cardList = document.getElementById('card-list');
   document.getElementById('count-badge').textContent = `${filtered.length}건`;
+  const excluded = getExcluded();
+  const memos    = getMemos();
 
   if (!filtered.length) {
     tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--muted)">조건에 맞는 물건이 없습니다</td></tr>`;
@@ -743,20 +838,19 @@ function renderTable() {
 
   // 데스크탑 테이블
   tbody.innerHTML = filtered.map((item, idx) => {
-    const rateClass = item.최저입찰가율 < 70 ? 'rate-low' : item.최저입찰가율 < 90 ? 'rate-mid' : 'rate-high';
+    const rateClass   = item.최저입찰가율 < 70 ? 'rate-low' : item.최저입찰가율 < 90 ? 'rate-mid' : 'rate-high';
     const statusClass = item.진행상황.includes('신건') ? 'status-new' : item.진행상황.includes('유찰') ? 'status-fail' : 'status-etc';
-    const area = item.전용면적
-      ? `<br><span style="font-size:11px;color:var(--muted)">${item.전용면적}㎡(${item.평형}평) ${item.층수 ? '| '+item.층수 : ''}</span>`
-      : '';
-    const yearTag = item.준공연도
-      ? `<br><span style="font-size:10px;color:var(--accent2)">${item.준공연도}년 (${item.건축연수}년차)</span>`
-      : '';
-    const fail = item.유찰횟수 ? `<br><span style="font-size:10px;color:var(--warn)">유찰 ${item.유찰횟수}회</span>` : '';
+    const area = item.전용면적 ? `<br><span style="font-size:11px;color:var(--muted)">${item.전용면적}㎡(${item.평형}평)${item.층수 ? ' | '+item.층수 : ''}</span>` : '';
+    const yearTag = item.준공연도 ? `<br><span style="font-size:10px;color:var(--accent2)">${item.준공연도}년(${item.건축연수}년차)</span>` : '';
+    const fail    = item.유찰횟수 ? `<br><span style="font-size:10px;color:var(--warn)">유찰 ${item.유찰횟수}회</span>` : '';
+    const isExcl  = excluded.includes(item.사건번호);
+    const hasMemo = memos[item.사건번호];
     const addrEsc = (item.소재지||'').replace(/'/g,"\\'").replace(/\n/g,' ');
+    const rowStyle = isExcl ? 'opacity:0.4' : '';
     return `
-      <tr onclick="openModal(${idx})">
-        <td><span class="case-num">${item.사건번호}</span></td>
-        <td><div class="address">${item.단지명 || item.소재지}</div><div class="address-full" style="font-size:11px;color:var(--muted)">${item.소재지}</div>${area}${yearTag}</td>
+      <tr onclick="openModal(${idx})" style="${rowStyle}">
+        <td><span class="case-num">${item.사건번호}</span>${hasMemo ? '<br><span style="font-size:10px;color:var(--warn)">📝 메모있음</span>' : ''}</td>
+        <td><div class="address">${item.소재지.replace(/\[.*/,'').trim()}</div>${area}${yearTag}</td>
         <td class="price price-appraisal">${item.감정가_표시 || fmt(item.감정가)}</td>
         <td class="price price-min">${item.최저입찰가_표시 || fmt(item.최저입찰가)}</td>
         <td style="text-align:center"><span class="rate-pill ${rateClass}">${item.최저입찰가율}%</span>${fail}</td>
@@ -770,20 +864,20 @@ function renderTable() {
 
   // 모바일 카드
   cardList.innerHTML = filtered.map((item, idx) => {
-    const rateClass = item.최저입찰가율 < 70 ? 'rate-low' : item.최저입찰가율 < 90 ? 'rate-mid' : 'rate-high';
+    const rateClass   = item.최저입찰가율 < 70 ? 'rate-low' : item.최저입찰가율 < 90 ? 'rate-mid' : 'rate-high';
     const statusClass = item.진행상황.includes('신건') ? 'status-new' : item.진행상황.includes('유찰') ? 'status-fail' : 'status-etc';
-    const area = item.전용면적 ? `${item.전용면적}㎡(${item.평형}평)` : '';
-    const fail = item.유찰횟수 ? ` · 유찰 ${item.유찰횟수}회` : '';
+    const area    = item.전용면적 ? `${item.전용면적}㎡(${item.평형}평)` : '';
+    const fail    = item.유찰횟수 ? ` · 유찰 ${item.유찰횟수}회` : '';
+    const isExcl  = excluded.includes(item.사건번호);
+    const hasMemo = memos[item.사건번호];
     const addrEsc = (item.소재지||'').replace(/'/g,"\\'").replace(/\n/g,' ');
-    // 주소에서 단지명 추출 (괄호 안)
     const nameMatch = item.소재지.match(/\(([^)]+)\)/);
     const aptName = nameMatch ? nameMatch[1].replace(/.*,/, '').trim() : item.소재지.split(' ').slice(0,5).join(' ');
-
     return `
-      <div class="auction-card" onclick="openModal(${idx})">
+      <div class="auction-card" onclick="openModal(${idx})" style="${isExcl ? 'opacity:0.4' : ''}">
         <div class="card-top">
           <div style="flex:1;min-width:0">
-            <div class="card-case">${item.사건번호}</div>
+            <div class="card-case">${item.사건번호} ${hasMemo ? '📝' : ''}</div>
             <div class="card-addr">${aptName}</div>
             <div class="card-sub">${item.소재지.replace(/\[.*/, '').replace(/\n/g,' ').trim()}</div>
             ${area ? `<div class="card-sub">${area}${item.층수 ? ' · '+item.층수 : ''}${fail}</div>` : ''}
@@ -808,68 +902,100 @@ function renderTable() {
 function renderSummary() {
   const total = filtered.length;
   if (!total) return;
-  const avgRate = (filtered.reduce((s,i) => s + i.최저입찰가율, 0) / total).toFixed(1);
-  const minRate = Math.min(...filtered.map(i => i.최저입찰가율));
+  const avgRate  = (filtered.reduce((s,i) => s + i.최저입찰가율, 0) / total).toFixed(1);
+  const minRate  = Math.min(...filtered.map(i => i.최저입찰가율));
   const minPrice = Math.min(...filtered.map(i => i.최저입찰가));
-
-  document.getElementById('s-total').textContent = total;
+  document.getElementById('s-total').textContent    = total;
   document.getElementById('s-avg-rate').textContent = avgRate + '%';
   document.getElementById('s-min-rate').textContent = minRate + '%';
   document.getElementById('s-min-price').textContent = fmt(minPrice);
-
-  // 사이드바 통계
-  const cntNew   = filtered.filter(i => i.진행상황.includes('신건')).length;
-  const cntFail  = filtered.filter(i => i.진행상황.includes('유찰')).length;
-  const under70  = filtered.filter(i => i.최저입찰가율 < 70).length;
+  const cntNew  = filtered.filter(i => i.진행상황.includes('신건')).length;
+  const cntFail = filtered.filter(i => i.진행상황.includes('유찰')).length;
+  const under70 = filtered.filter(i => i.최저입찰가율 < 70).length;
+  const excCnt  = getExcluded().length;
   document.getElementById('stats-content').innerHTML =
     `신건: <span style="color:var(--good)">${cntNew}건</span><br>` +
     `유찰: <span style="color:var(--warn)">${cntFail}건</span><br>` +
-    `입찰가율 70% 미만: <span style="color:var(--good)">${under70}건</span>`;
+    `입찰가율 70% 미만: <span style="color:var(--good)">${under70}건</span><br>` +
+    `제외된 물건: <span style="color:var(--muted)">${excCnt}건</span>`;
 }
 
 // ── 모달 ──
 function openModal(idx) {
   const item = filtered[idx];
   if (!item) return;
+  currentModalIdx = idx;
+  const excluded = getExcluded();
+  const memos    = getMemos();
+  const memo     = memos[item.사건번호] || {};
+  const isExcl   = excluded.includes(item.사건번호);
+
   document.getElementById('modal-title').textContent = item.사건번호;
-  document.getElementById('modal-link').href = item.상세링크 || '#';
 
   const fields = [
-    ['소재지', item.소재지],
-    ['감정가', item.감정가_표시 || fmt(item.감정가)],
+    ['소재지',    item.소재지.replace(/\n/g,' ')],
+    ['감정가',    item.감정가_표시 || fmt(item.감정가)],
     ['최저입찰가', item.최저입찰가_표시 || fmt(item.최저입찰가)],
-    ['입찰가율', item.최저입찰가율 + '%'],
-    ['전용면적', item.전용면적 ? item.전용면적 + '㎡' : '-'],
-    ['층수', item.층수 || '-'],
-    ['유찰횟수', item.유찰횟수 !== undefined ? item.유찰횟수 + '회' : '-'],
-    ['매각기일', item.매각기일 || '-'],
-    ['진행상황', item.진행상황 || '-'],
-    ['수집시각', item.수집시각 || '-'],
+    ['입찰가율',  item.최저입찰가율 + '%'],
+    ['전용면적',  item.전용면적 ? item.전용면적 + '㎡ (' + item.평형 + '평)' : '-'],
+    ['층수',      item.층수 || '-'],
+    ['유찰횟수',  item.유찰횟수 ? item.유찰횟수 + '회' : '0회'],
+    ['매각기일',  item.매각기일 || '-'],
+    ['진행상황',  item.진행상황 || '-'],
   ];
 
+  // 추천금액 있으면 표시
+  if (memo.price) {
+    fields.push(['🎯 추천입찰가', fmt(memo.price * 10000)]);
+  }
+
   document.getElementById('modal-body').innerHTML = fields.map(([k,v]) =>
-    `<div class="modal-field"><label>${k}</label><div class="val">${v}</div></div>`
+    `<div class="modal-field"><label>${k}</label><div class="val" style="font-size:12px;word-break:break-all">${v}</div></div>`
   ).join('');
+
+  // 메모 불러오기
+  document.getElementById('memo-text').value  = memo.text  || '';
+  document.getElementById('memo-price').value = memo.price || '';
+
+  // 제외 버튼 상태
+  const excBtn = document.getElementById('exclude-btn');
+  if (isExcl) {
+    excBtn.textContent = '✅ 제외 해제';
+    excBtn.onclick = () => unexcludeItem();
+  } else {
+    excBtn.textContent = '🚫 목록에서 제외';
+    excBtn.onclick = () => excludeItem();
+  }
 
   document.getElementById('modal-bg').classList.add('open');
 }
 
-// ── 카카오맵 바로가기 ──
-function openKakaoMap(e, addr) {
-  e.stopPropagation();
-  e.preventDefault();
-  const cleanAddr = addr.replace(/\[.*/, '').replace(/\n/g, ' ').trim();
-  const url = 'https://map.kakao.com/link/search/' + encodeURIComponent(cleanAddr);
-  window.open(url, '_blank');
+function unexcludeItem() {
+  if (currentModalIdx === null) return;
+  const item = filtered[currentModalIdx];
+  if (!item) return;
+  const excluded = getExcluded().filter(c => c !== item.사건번호);
+  setExcluded(excluded);
+  closeModal();
+  applyFilters();
 }
 
 function closeModal(e) {
   if (!e || e.target === document.getElementById('modal-bg')) {
     document.getElementById('modal-bg').classList.remove('open');
+    currentModalIdx = null;
   }
 }
 
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+// ── 카카오맵 ──
+function openKakaoMap(e, addr) {
+  e.stopPropagation();
+  e.preventDefault();
+  const cleanAddr = addr.replace(/\[.*/, '').replace(/\n/g, ' ').trim();
+  window.open('https://map.kakao.com/link/search/' + encodeURIComponent(cleanAddr), '_blank');
+}
 
 // ── 유틸 ──
 function fmt(won) {
