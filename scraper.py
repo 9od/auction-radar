@@ -198,7 +198,7 @@ def advance_page(driver, wanted):
     return False
 
 
-def read_all_pages(driver, parse, court, page_limit=0):
+def read_all_pages(driver, parse, court, page_limit=8):
     items, fingerprints = [], set()
     page = 1
     while True:
@@ -218,7 +218,7 @@ def read_all_pages(driver, parse, court, page_limit=0):
         if total is not None and len(items) >= total:
             break
         if page_limit and page >= page_limit:
-            raise CollectionError(f'{court}: 지정한 {page_limit}페이지 한도에 도달, 전체 수집 미완료')
+            break  # Requested bounded collection is a successful run.
         if not advance_page(driver, page + 1):
             if (total is not None and len(items) < total) or (visible_pages and max(visible_pages) > page):
                 raise CollectionError(f'{court}: 다음 페이지 이동 실패')
@@ -229,7 +229,7 @@ def read_all_pages(driver, parse, court, page_limit=0):
     return items
 
 
-def scrape_court(driver, court, page_limit=0):
+def scrape_court(driver, court, page_limit=8):
     driver.get(SEARCH_URL)
     time.sleep(CONFIG['request_interval_seconds'])
     check_blocked(driver.page_source)
@@ -244,7 +244,7 @@ def scrape_court(driver, court, page_limit=0):
     return items, code
 
 
-def scrape_recent_results(driver, court, page_limit=0):
+def scrape_recent_results(driver, court, page_limit=8):
     driver.get(RESULT_URL)
     time.sleep(CONFIG['request_interval_seconds'])
     check_blocked(driver.page_source)
@@ -368,7 +368,7 @@ def run(args):
     for item in new_by_id.values():
         item['목록상태'] = state_of(item)
     stamp = now_kst()
-    status = {'실행시각': stamp, '전체성공': len(success_courts) == len(CONFIG['courts']) and all(r['성공'] for r in reports), '상세': reports}
+    status = {'실행시각': stamp, '법원별페이지상한': args.pages, '목록정렬': '법원 검색 기본 순서 (등록일 최신순 미확인)', '전체성공': len(success_courts) == len(CONFIG['courts']) and all(r['성공'] for r in reports), '상세': reports}
     write_json(args.output, {'schema_version': 2, '수집일시': stamp if success_courts else previous.get('수집일시'),
                             '조건': CONFIG, '수집상태': status, '총건수': len(new_by_id),
                             'items': list(new_by_id.values())})
@@ -379,7 +379,7 @@ def run(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--pages', type=int, default=0, help='0: 전체 페이지. 제한 도달은 부분실패로 기록')
+    parser.add_argument('--pages', type=int, default=8, help='법원별 앞 N페이지 수집 (기본 8). 0: 전체 페이지')
     parser.add_argument('--output', default='docs/auction_data.json')
     parser.add_argument('--archive', default='docs/auction_archive.json')
     parser.add_argument('--import-results', help='출처를 확인한 과거 결과 JSON 병합 (네트워크 요청 없음)')

@@ -135,9 +135,28 @@ class FailureAndPaginationTests(unittest.TestCase):
         def parse(source,court):return [lot(물건번호=str(driver.page))]
         def advance(driver,wanted):driver.page=wanted;return True
         with patch('scraper.advance_page',advance):
-            rows=read_all_pages(driver,parse,'성남지원')
+            rows=read_all_pages(driver,parse,'성남지원',page_limit=0)
         self.assertEqual(len(rows),12)
         self.assertEqual(driver.page,12)
+
+    def test_default_limit_stops_at_eight_without_requesting_ninth(self):
+        from unittest.mock import patch
+        from scraper import read_all_pages
+        class Driver:
+            page=1
+            @property
+            def page_source(self):return '<p>총 물건수 12건</p>'
+            def find_elements(self,*args):return []
+        driver=Driver()
+        def parse(source,court):return [lot(물건번호=str(driver.page))]
+        def advance(driver,wanted):
+            self.assertLessEqual(wanted,8)
+            driver.page=wanted
+            return True
+        with patch('scraper.advance_page',side_effect=advance) as move:
+            rows=read_all_pages(driver,parse,'성남지원')
+        self.assertEqual(len(rows),8)
+        self.assertEqual(move.call_count,7)
 
     def test_collector_failure_keeps_last_data_and_reports_failure(self):
         import argparse

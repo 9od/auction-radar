@@ -32,10 +32,10 @@ jobs:
           if [ ! -f docs/auction_archive.json ]; then
             python scripts/restore_history.py
           fi
-      - name: 전체 페이지 수집 및 결과 확인
+      - name: 법원별 앞 8페이지 수집 및 결과 확인
         id: collect
         continue-on-error: true
-        run: python scraper.py --output docs/auction_data.json --archive docs/auction_archive.json
+        run: python scraper.py --pages 8 --output docs/auction_data.json --archive docs/auction_archive.json
       - name: 누적 기록과 수집 상태 저장
         if: always()
         run: |
