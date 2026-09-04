@@ -1,406 +1,393 @@
 #!/usr/bin/env python3
-"""
-법원경매 아파트 스크래퍼 v5 — select/button ID 정확 반영
-"""
+"""Court auction collector: scoped listings, recent results and durable observations."""
+import argparse
+import json
+import re
+import sys
+import time
+from pathlib import Path
+from lxml import html
+from auction_model import (CONFIG, amount, date_only, empty_archive, in_scope,
+                           load_json, merge_archive, normalize, now_kst, state_of, write_json)
 
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait, Select
-from selenium.webdriver.support import expected_conditions as EC
-from bs4 import BeautifulSoup
-import json, time, re, argparse, os
-from datetime import datetime
+BASE = 'https://www.courtauction.go.kr'
+SEARCH_URL = BASE + '/pgj/index.on?w2xPath=/pgj/ui/pgj100/PGJ151F00.xml'
+RESULT_URL = BASE + '/pgj/index.on?w2xPath=/pgj/ui/pgj100/PGJ158M00.xml'
+CASE_URL = BASE + '/pgj/index.on?w2xPath=/pgj/ui/pgj100/PGJ159M00.xml'
+IDS = {'court': 'mf_wfm_mainFrame_sbx_rletCortOfc',
+       'large': 'mf_wfm_mainFrame_sbx_rletLclLst',
+       'medium': 'mf_wfm_mainFrame_sbx_rletMclLst',
+       'small': 'mf_wfm_mainFrame_sbx_rletSclLst',
+       'search': 'mf_wfm_mainFrame_btn_gdsDtlSrch'}
 
-# ── 관심 지역 ───────────────────────────────────────────
-# 수지/광교 지역 (15년 이내 조건 적용)
-SUJI_AREAS = [
-    "성복동", "풍덕천동", "신봉동", "상현동",
-    "광교", "이의동", "원천동",
-]
-# 분당/판교 지역 (준공연도 조건 미적용)
-BUNDANG_AREAS = [
-    "분당구", "정자동", "수내동", "미금동", "금정동",
-    "서현동", "야탑동", "이매동", "금곡동", "구미동",
-    "백현동", "삼평동", "판교동", "운중동",
-]
-# 서울 강남/송파 지역 (준공연도 조건 미적용)
-SEOUL_AREAS = [
-    "강남구", "서초구", "송파구",
-    "압구정동", "청담동", "삼성동", "대치동", "개포동",
-    "도곡동", "역삼동", "논현동", "신사동", "잠원동",
-    "반포동", "서초동", "방배동", "양재동",
-    "잠실동", "신천동", "문정동", "가락동", "거여동",
-    "마천동", "방이동", "오금동", "풍납동", "천호동",
-]
 
-# 위례/하남 지역 (준공연도 조건 미적용)
-HANAM_AREAS = [
-    "위례", "하남시",
-    "창우동", "풍산동", "덕풍동", "신장동",
-    "미사동", "망월동", "초이동", "학암동",
-]
+class CollectionError(RuntimeError):
+    pass
 
-TARGET_AREAS = SUJI_AREAS + BUNDANG_AREAS + SEOUL_AREAS + HANAM_AREAS
 
-MIN_AREA_M2    = 59.0
-MIN_BUILD_YEAR = datetime.now().year - 15
-SEARCH_URL     = "https://www.courtauction.go.kr/pgj/index.on?w2xPath=/pgj/ui/pgj100/PGJ151F00.xml"
+class BlockedError(CollectionError):
+    pass
 
-# 법원 목록 — 수원/성남 + 서울중앙/동부 + 의정부(위례/하남 관할)
-COURTS = [
-    "수원지방법원",
-    "성남지원",
-    "서울중앙지방법원",
-    "서울동부지방법원",
-    "의정부지방법원",
-]
 
-def is_no_year_filter(addr):
-    """분당/서울/하남/위례 지역 — 준공연도 조건 면제"""
-    return any(kw in addr for kw in BUNDANG_AREAS + SEOUL_AREAS + HANAM_AREAS)
+def text(node):
+    return ' '.join(node.itertext()).strip() if node is not None else ''
 
-# ── 실제 확인된 select/button ID ────────────────────────
-ID_COURT = "mf_wfm_mainFrame_sbx_rletCortOfc"
-ID_LCL   = "mf_wfm_mainFrame_sbx_rletLclLst"
-ID_MCL   = "mf_wfm_mainFrame_sbx_rletMclLst"
-ID_SCL   = "mf_wfm_mainFrame_sbx_rletSclLst"
-ID_BTN   = "mf_wfm_mainFrame_btn_gdsDtlSrch"
 
-def m2_to_pyeong(m2):
-    return round(m2 / 3.305785, 1) if m2 else None
+def check_blocked(source):
+    if re.search(r'web firewall|접근이 차단|IP.*차단|비정상적인 접근', source, re.I):
+        raise BlockedError('법원 사이트 접근 차단. 우회·자동 재시도 없이 중단합니다.')
 
-def safe_int(text):
-    return int(re.sub(r"[^\d]", "", text or "") or "0")
 
-def fmt(won):
-    if not won: return "-"
-    if won >= 100_000_000:
-        eok = won // 100_000_000
-        rem = (won % 100_000_000) // 10_000_000
-        return f"{eok}억{f' {rem}천만' if rem else ''}"
-    if won >= 10_000: return f"{won // 10_000:,}만"
-    return f"{won:,}"
-
-def is_target(addr):
-    return any(kw in addr for kw in TARGET_AREAS)
-
-def make_driver():
-    opts = Options()
-    opts.add_argument("--headless")
-    opts.add_argument("--no-sandbox")
-    opts.add_argument("--disable-dev-shm-usage")
-    opts.add_argument("--disable-gpu")
-    opts.add_argument("--window-size=1400,900")
-    opts.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36")
-    return webdriver.Chrome(options=opts)
-
-def select_by_text(driver, el_id, text, wait_sec=2):
-    """ID로 select 찾아서 텍스트로 선택 후 change 이벤트 발생"""
-    el = driver.find_element(By.ID, el_id)
-    # value 찾기
-    opt = next((o for o in el.find_elements(By.TAG_NAME, "option") if o.text.strip() == text), None)
-    if not opt:
-        raise ValueError(f"'{text}' 옵션 없음 (id={el_id})")
-    driver.execute_script("""
-        arguments[0].value = arguments[1];
-        arguments[0].dispatchEvent(new Event('change', {bubbles: true}));
-    """, el, opt.get_attribute("value"))
-    time.sleep(wait_sec)
-
-def parse_table(driver):
-    """홀수/짝수 행 쌍으로 파싱"""
-    soup   = BeautifulSoup(driver.page_source, "lxml")
-    tables = soup.select("table")
-    if len(tables) < 2:
-        return []
-
-    rows  = tables[1].select("tbody tr")
+def parse_listing(source, court=''):
+    """The current PGJ151F01 grid uses two physical rows per auction lot."""
+    check_blocked(source)
+    tree = html.fromstring(source)
+    tables = tree.xpath('//table[.//td[contains(., "타경")]]')
+    if not tables:
+        if re.search(r'검색.*(?:없습니다|없음)|총\s*물건수\s*0\s*건', text(tree)):
+            return []
+        raise CollectionError('물건 표를 찾지 못했습니다. 빈 결과로 덮어쓰지 않습니다.')
     items = []
-    i = 0
-    while i < len(rows):
-        odd  = rows[i]
-        even = rows[i+1] if i+1 < len(rows) else None
-        i += 2
+    for table in tables:
+        rows = table.xpath('./tbody/tr') or table.xpath('./tr')
+        for index, row in enumerate(rows):
+            cells = row.xpath('./td')
+            if len(cells) < 8 or '타경' not in text(cells[1]):
+                continue
+            other = rows[index + 1].xpath('./td') if index + 1 < len(rows) else []
+            if len(other) < 3:
+                raise CollectionError('물건 행 구조 변경: 가격/진행상황을 확인할 수 없습니다.')
+            address = text(cells[3])
+            # Prefer 집합건물/building area rather than an earlier land-share area.
+            area_match = re.search(r'(?:집합건물|건물)[^\]]*?([\d,]+(?:\.\d+)?)\s*㎡', address)
+            if not area_match:
+                areas = re.findall(r'([\d,]+(?:\.\d+)?)\s*㎡', address)
+                area_match_value = areas[0] if len(areas) == 1 else None
+            else:
+                area_match_value = area_match.group(1)
+            lot = text(cells[2]).strip()
+            lot_match = re.fullmatch(r'(?:물건번호\s*)?\[?(\d+)\]?', lot)
+            item = {'법원': court, '사건번호': text(cells[1]), '소재지': address,
+                    '물건번호': lot_match.group(1) if lot_match else None,
+                    '용도': text(other[0]), '감정가': amount(text(cells[6])),
+                    '최저입찰가': amount(text(other[1])), '매각기일': text(cells[7]),
+                    '진행상황': text(other[2]),
+                    '전용면적': float(area_match_value.replace(',', '')) if area_match_value else None,
+                    '수집시각': now_kst()}
+            failures = re.search(r'유찰\s*(\d+)\s*회', item['진행상황'])
+            item['유찰횟수'] = int(failures.group(1)) if failures else 0
+            items.append(normalize(item))
+    if not items:
+        raise CollectionError('사건 표는 있으나 행 파싱 실패. 기존 데이터를 보존합니다.')
+    return list({i['id']: i for i in items}.values())
 
-        odd_cells  = odd.select("td")
-        even_cells = even.select("td") if even else []
-        if len(odd_cells) < 6:
+
+def parse_result_table(source, court=''):
+    """Read explicitly labelled result columns; never use minimum price as sale price."""
+    check_blocked(source)
+    tree = html.fromstring(source)
+    items = []
+    recognized = False
+    for table in tree.xpath('//table'):
+        headers = [re.sub(r'\s', '', text(n)) for n in table.xpath('.//thead//th')]
+        if not headers:
+            headers = [re.sub(r'\s', '', text(n)) for n in table.xpath('.//tr[1]/th')]
+        if not any('사건번호' in h for h in headers) or not any('결과' in h or '진행상황' in h for h in headers):
             continue
-
-        try:
-            addr_raw    = odd_cells[3].get_text(" ", strip=True)
-            감정가_raw   = odd_cells[6].get_text(strip=True) if len(odd_cells) > 6 else ""
-            매각기일_raw  = odd_cells[7].get_text(strip=True) if len(odd_cells) > 7 else ""
-            case_no     = odd_cells[1].get_text(strip=True).replace("\n", " ")
-
-            용도        = even_cells[0].get_text(strip=True) if even_cells else ""
-            최저가_raw  = even_cells[1].get_text(strip=True) if len(even_cells) > 1 else ""
-            진행상황    = even_cells[2].get_text(strip=True) if len(even_cells) > 2 else ""
-
-            # 최저입찰가: (49%) 괄호 제거 후 숫자만 추출
-            price_text  = re.sub(r"\([^)]*\)", "", 최저가_raw).strip()
-            최저가       = safe_int(price_text)
-            감정가       = safe_int(감정가_raw)
-
-            # 입찰가율: 괄호 안 % 우선
-            rate_m      = re.search(r"\((\d+)%\)", 최저가_raw)
-            입찰가율    = float(rate_m.group(1)) if rate_m else (
-                round(최저가 / 감정가 * 100, 1) if 감정가 > 0 else 0
-            )
-
-            # 면적
-            area_m      = re.search(r"([\d.]+)\s*㎡", addr_raw)
-            전용면적    = float(area_m.group(1)) if area_m else None
-            평형         = m2_to_pyeong(전용면적)
-
-            # 유찰횟수
-            fail_m      = re.search(r"유찰\s*(\d+)\s*회", 진행상황)
-            유찰횟수    = int(fail_m.group(1)) if fail_m else 0
-
-            items.append({
-                "사건번호":       case_no,
-                "소재지":        addr_raw,
-                "용도":          용도,
-                "감정가":        감정가,
-                "최저입찰가":     최저가,
-                "최저입찰가율":   입찰가율,
-                "감정가_표시":    fmt(감정가),
-                "최저입찰가_표시": fmt(최저가),
-                "매각기일":      매각기일_raw.replace("\n", " "),
-                "진행상황":      진행상황,
-                "전용면적":      전용면적,
-                "평형":          평형,
-                "층수":          None,
-                "준공연도":      None,
-                "건축연수":      None,
-                "유찰횟수":      유찰횟수,
-                "수집시각":      datetime.now().strftime("%Y-%m-%d %H:%M"),
-            })
-        except Exception as e:
-            continue
-
+        recognized = True
+        for row in table.xpath('.//tbody/tr'):
+            cells = row.xpath('./td')
+            if len(cells) != len(headers):
+                continue
+            values = dict(zip(headers, [text(c) for c in cells]))
+            def val(*labels):
+                return next((v for k, v in values.items() if any(label in k for label in labels)), '')
+            case = val('사건번호')
+            if '타경' not in case:
+                continue
+            addr = val('소재지', '주소')
+            areas = re.findall(r'([\d.]+)\s*㎡', val('면적') or addr)
+            item = {'법원': court, '사건번호': case, '소재지': addr,
+                    '물건번호': val('물건번호') or None, '용도': val('용도'),
+                    '전용면적': float(areas[-1]) if areas else None,
+                    '감정가': amount(val('감정')), '최저입찰가': amount(val('최저')),
+                    '낙찰가': amount(val('매각가격', '매각금액', '낙찰가', '낙찰금액')),
+                    '진행상황': val('결과', '진행상황'), '매각기일': val('매각기일', '입찰일'),
+                    '결과출처': RESULT_URL, '수집시각': now_kst()}
+            items.append(normalize(item))
+    if not recognized or (not items and '타경' in text(tree)):
+        raise CollectionError('매각결과 표 구조 확인 필요. 과거 보관 물건은 사건별 기일내역으로 조회합니다.')
     return items
 
-def get_current_page(driver):
-    try:
-        active = driver.find_element(By.CSS_SELECTOR, ".w2pageList_label_selected")
-        return int(active.text.strip())
-    except:
-        return 1
 
-def get_current_page(driver):
-    try:
-        active = driver.find_element(By.CSS_SELECTOR, ".w2pageList_label_selected")
-        return int(active.text.strip())
-    except:
-        return 1
+def parse_case_results(payload, tracked):
+    data = payload.get('data') or {}
+    if data.get('ipcheck') is False:
+        raise BlockedError('법원 사이트가 조회를 차단했습니다.')
+    if not data.get('dma_csBasInf'):
+        raise CollectionError('사건 조회 결과 없음')
+    schedule = data.get('dlt_rletCsGdsDtsDxdyInf')
+    if not isinstance(schedule, list):
+        raise CollectionError('기일내역 응답 구조 확인 필요')
+    lots = {str(r.get('dspslGdsSeq')) for r in schedule if r.get('dspslGdsSeq') is not None}
+    updates = []
+    for item in tracked:
+        lot = str(item.get('물건번호') or '')
+        if not lot and len(lots) == 1:
+            lot = next(iter(lots))
+        if not lot:
+            continue  # Ambiguous multiple lots: do not attach another apartment's result.
+        for row in schedule:
+            if str(row.get('dspslGdsSeq')) != lot:
+                continue
+            day = date_only(row.get('dspslDxdyYmd'))
+            status = str(row.get('rsltNm') or row.get('rsltCd') or '').strip()
+            if not day or not re.search(r'[가-힣]', status):
+                continue  # Unknown numeric codes are not guessed.
+            # Explicit sale-price fields only. Some responses include price in result text.
+            sale_price = next((amount(row[k]) for k in ('dspslPrc', 'sucbidAmt', '매각가격', '낙찰가') if amount(row.get(k))), None)
+            price_match = re.search(r'(?:매각|낙찰)\s*\(\s*([\d,]+)\s*원?\s*\)', status)
+            if not sale_price and price_match:
+                sale_price = amount(price_match.group(1))
+            updates.append(dict(item, 물건번호=lot, 매각일=day, 매각기일=day,
+                                진행상황=status, 낙찰가=sale_price, 낙찰가율=None,
+                                감정가=amount(row.get('aeeEvlAmt')) or item.get('감정가'),
+                                최저입찰가=amount(row.get('lwsDspslPrc')) or item.get('최저입찰가'),
+                                결과출처=CASE_URL))
+    return sorted(updates, key=lambda x: x['매각일'])
 
-def get_total_pages(driver):
-    try:
-        labels = driver.find_elements(By.CSS_SELECTOR, ".w2pageList_control_label")
-        nums = [int(l.text.strip()) for l in labels if l.text.strip().isdigit()]
-        return max(nums) if nums else 1
-    except:
-        return 1
 
-def get_total_count(driver):
-    try:
-        tables = driver.find_elements(By.CSS_SELECTOR, "table")
-        if tables:
-            text = tables[0].text
-            m = re.search(r"총\s*물건수\s*(\d+)건", text)
-            if m:
-                return int(m.group(1))
-    except:
-        pass
-    return 0
+def make_driver():
+    from selenium import webdriver
+    from selenium.webdriver.chrome.options import Options
+    opts = Options()
+    for option in ('--headless=new', '--no-sandbox', '--disable-dev-shm-usage', '--window-size=1400,900'):
+        opts.add_argument(option)
+    driver = webdriver.Chrome(options=opts)
+    driver.set_page_load_timeout(40)
+    driver.set_script_timeout(35)
+    return driver
 
-def scrape_court(driver, court_name, pages=10):
-    wait = WebDriverWait(driver, 20)
-    print(f"\n▶ [{court_name}] 수집 시작")
 
+def select_text(driver, el_id, value):
+    from selenium.webdriver.support.ui import Select
+    element = driver.find_element('id', el_id)
+    select = Select(element)
+    opt = next((o for o in select.options if o.text.strip() == value or o.text.strip().endswith(' ' + value)), None)
+    if opt is None:
+        raise CollectionError(f'{value}: 법원/분류 선택항목 없음')
+    select.select_by_value(opt.get_attribute('value'))
+    time.sleep(1)
+    return opt.get_attribute('value')
+
+
+def current_page(driver):
+    elements = driver.find_elements('css selector', '.w2pageList_label_selected')
+    return int(elements[0].text) if elements and elements[0].text.isdigit() else 1
+
+
+def advance_page(driver, wanted):
+    for selector in ('.w2pageList_control_label', '.w2pageList_col_next'):
+        for node in driver.find_elements('css selector', selector):
+            if selector.endswith('control_label') and node.text.strip() != str(wanted):
+                continue
+            driver.execute_script('arguments[0].click()', node)
+            time.sleep(CONFIG['request_interval_seconds'])
+            if current_page(driver) == wanted:
+                return True
+    return False
+
+
+def read_all_pages(driver, parse, court, page_limit=0):
+    items, fingerprints = [], set()
+    page = 1
+    while True:
+        source = driver.page_source
+        rows = parse(source, court)
+        if not rows:
+            return items
+        fingerprint = tuple(i['id'] for i in rows)
+        if fingerprint in fingerprints:
+            raise CollectionError(f'{court}: 페이지 반복 감지, 전체 수집 미완료')
+        fingerprints.add(fingerprint)
+        items.extend(rows)
+        count = re.search(r'총\s*물건수\s*[:：]?\s*([\d,]+)\s*건', text(html.fromstring(source)))
+        total = int(count.group(1).replace(',', '')) if count else None
+        labels = driver.find_elements('css selector', '.w2pageList_control_label')
+        visible_pages = [int(n.text) for n in labels if n.text.isdigit()]
+        if total is not None and len(items) >= total:
+            break
+        if page_limit and page >= page_limit:
+            raise CollectionError(f'{court}: 지정한 {page_limit}페이지 한도에 도달, 전체 수집 미완료')
+        if not advance_page(driver, page + 1):
+            if (total is not None and len(items) < total) or (visible_pages and max(visible_pages) > page):
+                raise CollectionError(f'{court}: 다음 페이지 이동 실패')
+            if total is None:
+                raise CollectionError(f'{court}: 총 물건수를 확인하지 못해 수집 완결성 확인 불가')
+            break
+        page += 1
+    return items
+
+
+def scrape_court(driver, court, page_limit=0):
     driver.get(SEARCH_URL)
-    time.sleep(3)
-
-    try:
-        # 법원 선택
-        select_by_text(driver, ID_COURT, court_name, wait_sec=1)
-        print(f"  법원 선택 완료: {court_name}")
-
-        # 대분류: 건물
-        select_by_text(driver, ID_LCL, "건물", wait_sec=1.5)
-
-        # 중분류: 주거용건물
-        select_by_text(driver, ID_MCL, "주거용건물", wait_sec=1.5)
-
-        # 소분류: 아파트
-        select_by_text(driver, ID_SCL, "아파트", wait_sec=1)
-        print("  분류 선택 완료: 건물 > 주거용건물 > 아파트")
-
-    except Exception as e:
-        print(f"  [오류] 폼 설정 실패: {e}")
-        return []
-
-    # 검색 버튼 클릭
-    try:
-        btn = driver.find_element(By.ID, ID_BTN)
-        driver.execute_script("arguments[0].click();", btn)
-        print("  검색 실행...")
-        time.sleep(4)
-    except Exception as e:
-        print(f"  [오류] 검색 버튼 실패: {e}")
-        return []
-
-    all_items  = []
-    seen_cases = set()
-
-    # 실제 총 페이지 수 파악
-    total_count = get_total_count(driver)
-    total_pages = min(get_total_pages(driver), pages)
-    print(f"  총 {total_count}건 / {total_pages}페이지 수집 예정")
-
-    for page in range(1, total_pages + 1):
-        print(f"  {page}p 파싱...", end=" ", flush=True)
-        time.sleep(2)
-
-        items   = parse_table(driver)
-        matched = [i for i in items
-                   if is_target(i["소재지"]) and i["사건번호"] not in seen_cases]
-        for item in matched:
-            seen_cases.add(item["사건번호"])
-
-        print(f"전체 {len(items)}건 → 지역매칭 {len(matched)}건")
-        all_items.extend(matched)
-
-        if page >= total_pages:
-            break
-
-        # 다음 페이지 이동 — .w2pageList_control_label 중 숫자 텍스트로 클릭
-        moved = False
-        try:
-            next_num = str(page + 1)
-            labels = driver.find_elements(By.CSS_SELECTOR, ".w2pageList_control_label")
-            for label in labels:
-                if label.text.strip() == next_num:
-                    driver.execute_script("arguments[0].click();", label)
-                    time.sleep(3)
-                    # 실제 이동 확인
-                    cur = get_current_page(driver)
-                    if cur == page + 1:
-                        moved = True
-                    break
-        except Exception as e:
-            print(f"  [경고] 페이지이동 오류: {e}")
-
-        if not moved:
-            # next 버튼 시도
-            try:
-                next_btn = driver.find_element(By.CSS_SELECTOR, ".w2pageList_col_next")
-                driver.execute_script("arguments[0].click();", next_btn)
-                time.sleep(3)
-                cur = get_current_page(driver)
-                if cur == page + 1:
-                    moved = True
-            except:
-                pass
-
-        if not moved:
-            print(f"  → 마지막 페이지 (총 {page}p)")
-            break
-
-    return all_items
-
-def final_filter(items, max_price, min_price, max_rate):
-    result, skip = [], {"면적": 0, "연도": 0, "가격": 0}
+    time.sleep(CONFIG['request_interval_seconds'])
+    check_blocked(driver.page_source)
+    code = select_text(driver, IDS['court'], court)
+    for key, value in [('large', '건물'), ('medium', '주거용건물'), ('small', '아파트')]:
+        select_text(driver, IDS[key], value)
+    driver.find_element('id', IDS['search']).click()
+    time.sleep(CONFIG['request_interval_seconds'])
+    items = read_all_pages(driver, parse_listing, court, page_limit)
     for item in items:
-        # 면적 조건 (공통)
-        if item["전용면적"] is not None and item["전용면적"] < MIN_AREA_M2:
-            skip["면적"] += 1; continue
-        # 준공연도 조건 — 분당/서울은 면제
-        if not is_no_year_filter(item["소재지"]):
-            if item["준공연도"] is not None and item["준공연도"] < MIN_BUILD_YEAR:
-                skip["연도"] += 1; continue
-        # 가격 조건 (공통)
-        if max_price and item["최저입찰가"] > max_price:
-            skip["가격"] += 1; continue
-        if min_price and item["최저입찰가"] < min_price:
-            skip["가격"] += 1; continue
-        if max_rate and item["최저입찰가율"] > max_rate:
-            skip["가격"] += 1; continue
-        result.append(item)
-    return result, skip
+        item['법원코드'] = code
+    return items, code
+
+
+def scrape_recent_results(driver, court, page_limit=0):
+    driver.get(RESULT_URL)
+    time.sleep(CONFIG['request_interval_seconds'])
+    check_blocked(driver.page_source)
+    # Discover controls from their actual option labels instead of inventing page IDs.
+    selected = False
+    for node in driver.find_elements('tag name', 'select'):
+        options = node.find_elements('tag name', 'option')
+        if any(o.text.strip() == court or o.text.strip().endswith(' ' + court) for o in options):
+            select_text(driver, node.get_attribute('id'), court)
+            selected = True
+            break
+    if not selected:
+        raise CollectionError('매각결과 법원 선택 컨트롤 확인 필요')
+    buttons = driver.find_elements('xpath', '//*[self::button or self::a or self::input][normalize-space(.)="검색" or @value="검색"]')
+    buttons = [b for b in buttons if b.is_displayed()]
+    if len(buttons) != 1:
+        raise CollectionError('매각결과 검색 버튼 확인 필요')
+    buttons[0].click()
+    time.sleep(CONFIG['request_interval_seconds'])
+    return read_all_pages(driver, parse_result_table, court, page_limit)
+
+
+def fetch_case(driver, court_code, case_no):
+    time.sleep(CONFIG['request_interval_seconds'])
+    result = driver.execute_async_script('''
+        const [body, done] = arguments;
+        fetch('/pgj/pgj15A/selectAuctnCsSrchRslt.on', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          credentials:'same-origin', body:JSON.stringify(body), signal:AbortSignal.timeout(30000)
+        }).then(async r => done({status:r.status, text:await r.text()}))
+          .catch(e => done({error:String(e)}));
+    ''', {'dma_srchCsDtlInf': {'cortOfcCd': court_code, 'csNo': case_no}})
+    if result.get('error'):
+        raise CollectionError(result['error'])
+    check_blocked(result.get('text', ''))
+    if result.get('status') != 200:
+        raise CollectionError('사건 조회 HTTP 오류')
+    return json.loads(result['text'])
+
+
+def run(args):
+    archive_path = Path(args.archive)
+    archive = load_json(archive_path, empty_archive())
+    previous = load_json(args.output, {'items': []})
+    archive = merge_archive(archive, previous.get('items', []), previous.get('수집일시') or now_kst())
+    if args.import_results:
+        imported = load_json(args.import_results)
+        rows = imported.get('items', []) if isinstance(imported, dict) else imported
+        for row in rows:
+            if not row.get('결과출처') or not row.get('법원') or not row.get('사건번호'):
+                raise ValueError('결과 가져오기에는 법원·사건번호·결과출처가 필요합니다.')
+        archive = merge_archive(archive, rows)
+        write_json(archive_path, archive)
+        return 0
+    reports, incoming, court_codes = [], [], {}
+    driver = None
+    blocked = False
+    listings_merged = False
+    try:
+        driver = make_driver()
+        for court in CONFIG['courts']:
+            try:
+                rows, code = scrape_court(driver, court, args.pages)
+                incoming.extend(rows)
+                court_codes[court] = code
+                reports.append({'법원': court, '종류': '진행', '성공': True, '조회건수': len(rows)})
+            except BlockedError:
+                blocked = True
+                raise
+            except Exception as exc:
+                reports.append({'법원': court, '종류': '진행', '성공': False, '오류': str(exc)[:240]})
+        archive = merge_archive(archive, incoming)
+        listings_merged = True
+        for court in CONFIG['courts']:
+            try:
+                rows = scrape_recent_results(driver, court, args.pages)
+                archive = merge_archive(archive, rows)
+                reports.append({'법원': court, '종류': '최근결과', '성공': True, '조회건수': len(rows)})
+            except BlockedError:
+                blocked = True
+                raise
+            except Exception as exc:
+                reports.append({'법원': court, '종류': '최근결과', '성공': False, '오류': str(exc)[:240]})
+        driver.get(CASE_URL)
+        time.sleep(CONFIG['request_interval_seconds'])
+        check_blocked(driver.page_source)
+        groups = {}
+        for item in archive['items']:
+            if (state_of(item) != '진행' or any(h.get('매각일') and h['매각일'] < now_kst()[:10] and h.get('진행상황') not in ('매각', '낙찰') for h in item.get('이력', []))):
+                groups.setdefault((item['법원'], item['사건번호']), []).append(item)
+        for (court, case_no), tracked in groups.items():
+            try:
+                code = court_codes.get(court) or tracked[0].get('법원코드')
+                if not code:
+                    raise CollectionError('법원코드 미확인')
+                updates = parse_case_results(fetch_case(driver, code, case_no), tracked)
+                if not updates:
+                    raise CollectionError('물건별 결과를 확정할 수 없습니다. 원문 확인 필요')
+                archive = merge_archive(archive, updates)
+                reports.append({'법원': court, '사건번호': case_no, '종류': '기일내역', '성공': True, '확인건수': len(updates)})
+            except BlockedError:
+                blocked = True
+                raise
+            except Exception as exc:
+                reports.append({'법원': court, '사건번호': case_no, '종류': '기일내역', '성공': False, '오류': str(exc)[:240]})
+    except Exception as exc:
+        reports.append({'종류': '실행', '성공': False, '오류': str(exc)[:240], '접근차단': blocked})
+    finally:
+        if driver is not None:
+            driver.quit()
+    # Partial failures must not remove last-known records or mark missing lots as sold.
+    if not listings_merged:
+        archive = merge_archive(archive, incoming)
+    write_json(archive_path, archive)
+    success_courts = {r['법원'] for r in reports if r.get('종류') == '진행' and r.get('성공')}
+    new_by_id = {i['id']: i for i in incoming if in_scope(i)}
+    for raw in previous.get('items', []):
+        old = normalize(raw)
+        if in_scope(old) and old['id'] not in new_by_id:
+            new_by_id[old['id']] = dict(old, 재확인필요=True)
+    for item in new_by_id.values():
+        item['목록상태'] = state_of(item)
+    stamp = now_kst()
+    status = {'실행시각': stamp, '전체성공': len(success_courts) == len(CONFIG['courts']) and all(r['성공'] for r in reports), '상세': reports}
+    write_json(args.output, {'schema_version': 2, '수집일시': stamp if success_courts else previous.get('수집일시'),
+                            '조건': CONFIG, '수집상태': status, '총건수': len(new_by_id),
+                            'items': list(new_by_id.values())})
+    write_json(Path(args.output).parent / 'collection_status.json', status)
+    print(json.dumps(status, ensure_ascii=False, indent=2))
+    return 0 if status['전체성공'] else 1
+
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--pages",     type=int,   default=5)
-    parser.add_argument("--max-price", type=int,   default=None)
-    parser.add_argument("--min-price", type=int,   default=None)
-    parser.add_argument("--max-rate",  type=float, default=None)
-    parser.add_argument("--output",    default="docs/auction_data.json")
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--pages', type=int, default=0, help='0: 전체 페이지. 제한 도달은 부분실패로 기록')
+    parser.add_argument('--output', default='docs/auction_data.json')
+    parser.add_argument('--archive', default='docs/auction_archive.json')
+    parser.add_argument('--import-results', help='출처를 확인한 과거 결과 JSON 병합 (네트워크 요청 없음)')
     args = parser.parse_args()
+    if args.pages < 0:
+        parser.error('--pages는 0 이상이어야 합니다')
+    sys.exit(run(args))
 
-    print(f"\n{'━'*52}")
-    print(f"  경매레이더 v5 — 수지/광교/분당 아파트")
-    print(f"  면적: {MIN_AREA_M2}㎡↑ | 준공: {MIN_BUILD_YEAR}년↑")
-    print(f"{'━'*52}")
 
-    driver      = make_driver()
-    all_matched = []
-
-    try:
-        for court in COURTS:
-            matched = scrape_court(driver, court, pages=args.pages)
-            all_matched.extend(matched)
-    finally:
-        driver.quit()
-
-    # 전체 중복 제거
-    seen, dedup = set(), []
-    for item in all_matched:
-        if item["사건번호"] not in seen:
-            seen.add(item["사건번호"])
-            dedup.append(item)
-
-    filtered, skip = final_filter(dedup, args.max_price, args.min_price, args.max_rate)
-    filtered.sort(key=lambda x: x["최저입찰가율"])
-
-    print(f"\n{'─'*52}")
-    print(f"  지역 매칭 합계  : {len(dedup)}건")
-    print(f"  면적 미달 제외  : {skip['면적']}건")
-    print(f"  준공연도 제외   : {skip['연도']}건")
-    print(f"  ✅ 최종 결과    : {len(filtered)}건")
-    print(f"{'─'*52}\n")
-
-    os.makedirs(os.path.dirname(args.output) if os.path.dirname(args.output) else ".", exist_ok=True)
-
-    with open(args.output, "w", encoding="utf-8") as f:
-        json.dump({
-            "수집일시": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "조건": {
-                "관심지역":  TARGET_AREAS,
-                "최소전용":  f"{MIN_AREA_M2}㎡ ({m2_to_pyeong(MIN_AREA_M2)}평)",
-                "준공기준":  f"{MIN_BUILD_YEAR}년 이후",
-                "최대가격":  fmt(args.max_price) if args.max_price else "제한없음",
-            },
-            "총건수": len(filtered),
-            "items":  filtered,
-        }, f, ensure_ascii=False, indent=2)
-
-    print(f"💾 저장: {args.output}")
-
-    if filtered:
-        print("\n─── TOP 10 ───")
-        for item in filtered[:10]:
-            area = f"{item['전용면적']}㎡({item['평형']}평)" if item.get("전용면적") else "면적미상"
-            fail = f" | 유찰 {item['유찰횟수']}회" if item.get("유찰횟수") else ""
-            print(f"\n  {item['사건번호']}")
-            print(f"  📍 {item['소재지'][:50]}")
-            print(f"  🏠 {area}")
-            print(f"  💰 {item['감정가_표시']} → {item['최저입찰가_표시']} ({item['최저입찰가율']}%){fail}")
-            print(f"  📅 {item['매각기일']} | {item['진행상황']}")
-    else:
-        print("⚠️  조건에 맞는 물건이 없습니다.")
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

@@ -2,37 +2,55 @@ name: 경매 데이터 자동 수집
 
 on:
   schedule:
-    - cron: '0 22 * * *'   # 매일 KST 07:00
+    - cron: '0 22 * * *' # KST 07:00
   workflow_dispatch:
+
+concurrency:
+  group: auction-data-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   scrape:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     permissions:
       contents: write
-
     steps:
       - uses: actions/checkout@v4
-
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
-      - name: Chrome 설치
-        run: |
-          wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-          sudo apt-get install -y ./google-chrome-stable_current_amd64.deb
-
+          cache: pip
       - name: 패키지 설치
-        run: pip install selenium beautifulsoup4 lxml webdriver-manager
-
-      - name: 스크래퍼 실행
-        run: python scraper.py --pages 5 --output docs/auction_data.json
-
-      - name: 결과 커밋 & 푸시
+        run: pip install -r requirements.txt
+      - name: 데이터 처리 검증
+        run: python -m unittest discover -s tests -v
+      - name: 과거 Git 기록 복원 (최초 1회)
         run: |
-          git config user.name  "auction-radar-bot"
+          if [ ! -f docs/auction_archive.json ]; then
+            python scripts/restore_history.py
+          fi
+      - name: 전체 페이지 수집 및 결과 확인
+        id: collect
+        continue-on-error: true
+        run: python scraper.py --output docs/auction_data.json --archive docs/auction_archive.json
+      - name: 누적 기록과 수집 상태 저장
+        if: always()
+        run: |
+          git config user.name "auction-radar-bot"
           git config user.email "bot@auction-radar"
           git add docs/auction_data.json
-          git diff --staged --quiet || git commit -m "데이터 자동 수집 $(TZ='Asia/Seoul' date '+%Y-%m-%d %H:%M')"
-          git push
+          for file in docs/auction_archive.json docs/collection_status.json; do
+            if [ -f "$file" ]; then git add "$file"; fi
+          done
+          if ! git diff --staged --quiet; then
+            git commit -m "경매 목록·결과 이력 갱신"
+            git push
+          fi
+      - name: 일부 수집 실패 알림
+        if: steps.collect.outcome == 'failure'
+        run: |
+          echo '일부 수집이 실패했습니다. 기존 기록은 유지됩니다. docs/collection_status.json을 확인하세요.'
+          exit 1

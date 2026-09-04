@@ -1,0 +1,18 @@
+const assert=require('node:assert/strict');
+const A=require('../docs/app-core.js');
+const raw={id:'lot',법원:'성남지원',사건번호:'2025타경1234',용도:'아파트',소재지:'경기도 성남시 분당구 수내동 푸른마을',전용면적:84.5,감정가:2e9,최저입찰가:1.5e9,매각기일:'2026.09.21',진행상황:'신건'};
+const i=A.normalized(raw);
+assert(A.scope(i));assert(!A.scope(A.normalized({...raw,전용면적:null})));assert(!A.scope(A.normalized({...raw,최저입찰가:1500000001})));
+assert.equal(A.state(i,'2026-09-22'),'pending');assert.equal(A.state(i,'2026-09-20'),'active');
+let v=A.views({items:[raw]},{items:[]},'2026-09-22');assert.equal(v.done.length,0);assert.equal(v.pending.length,1);
+const sold={...raw,진행상황:'매각',낙찰가:1.78e9};
+v=A.views({items:[raw]},{items:[sold]},'2026-09-22');assert.equal(v.done.length,1);assert.equal(v.done[0].낙찰가율,89);assert.equal(v.active.length,0);
+const relist={...raw,매각기일:'2026.10.21',진행상황:'재매각',이력:[{매각일:'2026-09-21',진행상황:'매각',낙찰가:1.78e9,최저입찰가:1.5e9,감정가:2e9}]};
+v=A.views({items:[]},{items:[relist]},'2026-09-22');assert.equal(v.done.length,1);assert.equal(v.pending.length,1);
+assert.equal(A.normalized({...raw,낙찰가:undefined}).낙찰가율,null);
+assert.equal(A.escape('<img onerror="x">'), '&lt;img onerror=&quot;x&quot;&gt;');
+for(const u of ['javascript:alert(1)','https://chatgpt.com.evil.com/g/g-p-abc/project','https://evil.com','http://chatgpt.com/g/g-p-abc/project'])assert.equal(A.projectUrl(u),'');
+assert.equal(A.projectUrl('https://chatgpt.com/g/g-p-abc123-home/project'),'https://chatgpt.com/g/g-p-abc123-home/project');
+assert(A.prompt(i).includes('성남지원 2025타경1234'));assert(A.prompt(i).includes(i.주소));
+assert.equal(A.normalized({...raw,법원:'',사건번호:'서울중앙지방법원2025타경1031482025타경1888(중복)'}).사건번호,'2025타경103148');
+console.log('app-core: scope, result rates, archive precedence, project URL and XSS checks passed');
