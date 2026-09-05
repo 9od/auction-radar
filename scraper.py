@@ -321,7 +321,7 @@ def fetch_case(driver, court_code, case_no):
         const [body, done] = arguments;
         fetch('/pgj/pgj15A/selectAuctnCsSrchRslt.on', {
           method:'POST', headers:{'Content-Type':'application/json'},
-          credentials:'same-origin', body:JSON.stringify(body), signal:AbortSignal.timeout(30000)
+          credentials:'same-origin', body:JSON.stringify(body), signal:AbortSignal.timeout(12000)
         }).then(async r => done({status:r.status, text:await r.text()}))
           .catch(e => done({error:String(e)}));
     ''', {'dma_srchCsDtlInf': {'cortOfcCd': court_code, 'csNo': case_no}})
@@ -345,6 +345,16 @@ def current_listing_snapshot(incoming, previous_items):
         if in_scope(old) and old['id'] not in current:
             current[old['id']] = dict(old, 재확인필요=True)
     return current
+
+
+def rotating_batch(entries, limit, day_key):
+    """Bound slow result lookups while rotating through every tracked case over time."""
+    entries = list(entries)
+    if not entries or not limit or limit >= len(entries):
+        return entries
+    start = int(re.sub(r'\D', '', day_key)) % len(entries)
+    rotated = entries[start:] + entries[:start]
+    return rotated[:limit]
 
 
 def run(args):
@@ -399,7 +409,9 @@ def run(args):
         for item in archive['items']:
             if (state_of(item) != '진행' or any(h.get('매각일') and h['매각일'] < now_kst()[:10] and h.get('진행상황') not in ('매각', '낙찰') for h in item.get('이력', []))):
                 groups.setdefault((item['법원'], item['사건번호']), []).append(item)
-        for (court, case_no), tracked in groups.items():
+        cases = rotating_batch(groups.items(), CONFIG.get('result_case_limit_per_run', 20), now_kst()[:10])
+        reports.append({'종류': '기일내역범위', '성공': True, '전체후보': len(groups), '확인건수': len(cases)})
+        for (court, case_no), tracked in cases:
             try:
                 code = court_codes.get(court) or tracked[0].get('법원코드')
                 if not code:
