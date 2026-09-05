@@ -161,14 +161,14 @@ def make_driver():
     from selenium import webdriver
     from selenium.webdriver.chrome.options import Options
     opts = Options()
-    # The court page keeps loading non-essential resources for a long time.
-    # Waiting for DOMContentLoaded is enough for the WebSquare controls and
-    # avoids Chrome's renderer timeout on GitHub-hosted runners.
-    opts.page_load_strategy = 'eager'
+    # The WebSquare page can postpone even DOMContentLoaded while loading
+    # non-essential resources. Return immediately after navigation starts and
+    # let load_page wait for the one control the collector actually needs.
+    opts.page_load_strategy = 'none'
     for option in ('--headless=new', '--no-sandbox', '--disable-dev-shm-usage', '--window-size=1400,900'):
         opts.add_argument(option)
     driver = webdriver.Chrome(options=opts)
-    driver.set_page_load_timeout(90)
+    driver.set_page_load_timeout(60)
     driver.set_script_timeout(35)
     return driver
 
