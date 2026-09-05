@@ -169,7 +169,7 @@ def make_driver():
         opts.add_argument(option)
     driver = webdriver.Chrome(options=opts)
     driver.set_page_load_timeout(60)
-    driver.set_script_timeout(35)
+    driver.set_script_timeout(15)
     return driver
 
 

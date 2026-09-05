@@ -6,5 +6,5 @@
   "courts": ["수원지방법원", "성남지원", "안양지원", "서울중앙지방법원", "서울동부지방법원", "서울서부지방법원", "서울남부지방법원", "서울북부지방법원"],
   "area_note": "전용 84~135㎡. 공급 30~50평대의 근사 범위이며 정확한 공급평형은 단지별 확인 필요.",
   "request_interval_seconds": 3,
-  "result_case_limit_per_run": 20
+  "result_case_limit_per_run": 12
 }
