@@ -123,6 +123,42 @@ class AuctionTests(unittest.TestCase):
 
 
 class FailureAndPaginationTests(unittest.TestCase):
+    def test_page_loader_retries_a_renderer_timeout(self):
+        import sys
+        from types import ModuleType
+        from unittest.mock import patch
+        from scraper import load_page
+
+        class TimeoutException(Exception): pass
+        class WebDriverException(Exception): pass
+        exceptions = ModuleType('selenium.common.exceptions')
+        exceptions.TimeoutException = TimeoutException
+        exceptions.WebDriverException = WebDriverException
+        support_ui = ModuleType('selenium.webdriver.support.ui')
+        class Wait:
+            def __init__(self, driver, seconds): self.driver = driver
+            def until(self, predicate):
+                if not predicate(self.driver): raise TimeoutException('not ready')
+        support_ui.WebDriverWait = Wait
+        modules = {'selenium': ModuleType('selenium'),
+                   'selenium.common': ModuleType('selenium.common'),
+                   'selenium.common.exceptions': exceptions,
+                   'selenium.webdriver': ModuleType('selenium.webdriver'),
+                   'selenium.webdriver.support': ModuleType('selenium.webdriver.support'),
+                   'selenium.webdriver.support.ui': support_ui}
+        class Driver:
+            calls = 0
+            page_source = '<html></html>'
+            def get(self, url):
+                self.calls += 1
+                if self.calls == 1: raise TimeoutException('renderer timeout')
+            def execute_script(self, script): pass
+            def find_elements(self, by, value): return [object()] if self.calls > 1 else []
+        driver = Driver()
+        with patch.dict(sys.modules, modules), patch('scraper.time.sleep'):
+            load_page(driver, 'https://example.test', ready_id='court')
+        self.assertEqual(driver.calls, 2)
+
     def test_more_than_ten_pages_are_collected(self):
         from unittest.mock import patch
         from scraper import read_all_pages

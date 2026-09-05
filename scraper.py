@@ -161,12 +161,57 @@ def make_driver():
     from selenium import webdriver
     from selenium.webdriver.chrome.options import Options
     opts = Options()
+    # The court page keeps loading non-essential resources for a long time.
+    # Waiting for DOMContentLoaded is enough for the WebSquare controls and
+    # avoids Chrome's renderer timeout on GitHub-hosted runners.
+    opts.page_load_strategy = 'eager'
     for option in ('--headless=new', '--no-sandbox', '--disable-dev-shm-usage', '--window-size=1400,900'):
         opts.add_argument(option)
     driver = webdriver.Chrome(options=opts)
-    driver.set_page_load_timeout(40)
+    driver.set_page_load_timeout(90)
     driver.set_script_timeout(35)
     return driver
+
+
+def load_page(driver, url, ready_id=None, attempts=2):
+    """Load a court page with one bounded retry for transient renderer stalls."""
+    from selenium.common.exceptions import TimeoutException, WebDriverException
+    from selenium.webdriver.support.ui import WebDriverWait
+
+    last_error = None
+    for attempt in range(attempts):
+        try:
+            driver.get(url)
+        except (TimeoutException, WebDriverException) as exc:
+            last_error = exc
+            try:
+                driver.execute_script('window.stop()')
+            except Exception:
+                pass
+        try:
+            check_blocked(driver.page_source)
+            if ready_id:
+                WebDriverWait(driver, 25).until(
+                    lambda d: d.find_elements('id', ready_id)
+                )
+            return
+        except BlockedError:
+            raise
+        except Exception as exc:
+            last_error = exc
+        if attempt + 1 < attempts:
+            time.sleep(8)
+    raise CollectionError(f'법원 페이지 로딩 실패 ({attempts}회 시도): {last_error}')
+
+
+def restart_driver(driver):
+    """A renderer timeout poisons the Chrome session; replace it for next court."""
+    if driver is not None:
+        try:
+            driver.quit()
+        except Exception:
+            pass
+    return make_driver()
 
 
 def select_text(driver, el_id, value):
@@ -230,7 +275,7 @@ def read_all_pages(driver, parse, court, page_limit=8):
 
 
 def scrape_court(driver, court, page_limit=8):
-    driver.get(SEARCH_URL)
+    load_page(driver, SEARCH_URL, IDS['court'])
     time.sleep(CONFIG['request_interval_seconds'])
     check_blocked(driver.page_source)
     code = select_text(driver, IDS['court'], court)
@@ -245,7 +290,7 @@ def scrape_court(driver, court, page_limit=8):
 
 
 def scrape_recent_results(driver, court, page_limit=8):
-    driver.get(RESULT_URL)
+    load_page(driver, RESULT_URL)
     time.sleep(CONFIG['request_interval_seconds'])
     check_blocked(driver.page_source)
     # Discover controls from their actual option labels instead of inventing page IDs.
@@ -316,6 +361,7 @@ def run(args):
                 raise
             except Exception as exc:
                 reports.append({'법원': court, '종류': '진행', '성공': False, '오류': str(exc)[:240]})
+                driver = restart_driver(driver)
         archive = merge_archive(archive, incoming)
         listings_merged = True
         for court in CONFIG['courts']:
@@ -328,7 +374,8 @@ def run(args):
                 raise
             except Exception as exc:
                 reports.append({'법원': court, '종류': '최근결과', '성공': False, '오류': str(exc)[:240]})
-        driver.get(CASE_URL)
+                driver = restart_driver(driver)
+        load_page(driver, CASE_URL)
         time.sleep(CONFIG['request_interval_seconds'])
         check_blocked(driver.page_source)
         groups = {}
@@ -354,7 +401,10 @@ def run(args):
         reports.append({'종류': '실행', '성공': False, '오류': str(exc)[:240], '접근차단': blocked})
     finally:
         if driver is not None:
-            driver.quit()
+            try:
+                driver.quit()
+            except Exception:
+                pass
     # Partial failures must not remove last-known records or mark missing lots as sold.
     if not listings_merged:
         archive = merge_archive(archive, incoming)
@@ -368,13 +418,22 @@ def run(args):
     for item in new_by_id.values():
         item['목록상태'] = state_of(item)
     stamp = now_kst()
-    status = {'실행시각': stamp, '법원별페이지상한': args.pages, '목록정렬': '법원 검색 기본 순서 (등록일 최신순 미확인)', '전체성공': len(success_courts) == len(CONFIG['courts']) and all(r['성공'] for r in reports), '상세': reports}
+    listing_success = len(success_courts) == len(CONFIG['courts'])
+    result_reports = [r for r in reports if r.get('종류') in ('최근결과', '기일내역')]
+    results_success = bool(result_reports) and all(r['성공'] for r in result_reports)
+    status = {'실행시각': stamp, '법원별페이지상한': args.pages,
+              '목록정렬': '법원 검색 기본 순서 (등록일 최신순 미확인)',
+              '목록수집성공': listing_success, '완료결과수집성공': results_success,
+              '전체성공': listing_success and results_success, '상세': reports}
     write_json(args.output, {'schema_version': 2, '수집일시': stamp if success_courts else previous.get('수집일시'),
                             '조건': CONFIG, '수집상태': status, '총건수': len(new_by_id),
                             'items': list(new_by_id.values())})
     write_json(Path(args.output).parent / 'collection_status.json', status)
     print(json.dumps(status, ensure_ascii=False, indent=2))
-    return 0 if status['전체성공'] else 1
+    # Result history is secondary and may be unavailable outside its public
+    # result window. Fail the workflow only when the primary current listing
+    # collection is incomplete; the UI still warns when result checks fail.
+    return 0 if listing_success else 1
 
 
 def main():
