@@ -4,7 +4,8 @@ import unittest
 from pathlib import Path
 from auction_model import (CONFIG, amount, date_only, empty_archive, in_scope, load_json,
                            merge_archive, normalize, region_of, state_of, write_json)
-from scraper import parse_listing, parse_case_results, parse_result_table, CollectionError, BlockedError
+from scraper import (parse_listing, parse_case_results, parse_result_table,
+                     current_listing_snapshot, CollectionError, BlockedError)
 
 
 def lot(**values):
@@ -28,6 +29,14 @@ class AuctionTests(unittest.TestCase):
         for area in (84,84.99,135): self.assertTrue(in_scope(lot(전용면적=area)))
         for area in (83.99,135.01,165,None): self.assertFalse(in_scope(lot(전용면적=area)))
         self.assertFalse(in_scope(lot(용도='오피스텔')))
+
+    def test_current_snapshot_replaces_legacy_row_without_lot_number(self):
+        fresh = lot()
+        legacy = lot()
+        legacy.pop('물건번호')
+        legacy = normalize(legacy)
+        snapshot = current_listing_snapshot([fresh], [legacy])
+        self.assertEqual(list(snapshot), [fresh['id']])
 
     def test_all_seoul_and_precise_regions(self):
         for district in ('강북구','마포구','은평구','중랑구','금천구'):
