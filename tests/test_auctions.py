@@ -38,6 +38,9 @@ class AuctionTests(unittest.TestCase):
         self.assertIsNone(region_of('부산광역시 중구 신장동'))
         self.assertEqual(region_of('경기도 성남시 수정구 위례광장로 1'),'위례')
         self.assertEqual(region_of('경기도 하남시 학암동 1'),'위례')
+        self.assertEqual(region_of('경기도 성남시 수정구 태평동 1'),'성남 전체')
+        self.assertEqual(region_of('경기도 성남시 중원구 은행동 1'),'성남 전체')
+        self.assertEqual(region_of('경기도 성남시 분당구 수내동 1'),'성남 전체')
 
     def test_case_court_and_lot_identity_and_related_case_split(self):
         self.assertNotEqual(lot()['id'],lot(법원='서울중앙지방법원')['id'])
