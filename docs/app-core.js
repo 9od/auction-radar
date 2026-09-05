@@ -14,7 +14,7 @@
     if (/^서울(?:특별시|시)?\s/.test(a)) return '서울';
     for (const c of ['수원','안양','과천','하남']) if (new RegExp(`(?:^|\\s)${c}시\\s`).test(a)) return c;
     if (a.includes('용인시') && a.includes('수지구')) return '용인 수지';
-    if (a.includes('성남시') && a.includes('분당구')) return '성남 분당·판교';
+    if (a.includes('성남시')) return '성남 전체';
     return '';
   }
   function normalized(raw) {

@@ -50,8 +50,8 @@ def region_of(address):
             return city
     if '용인시' in text and '수지구' in text:
         return '용인 수지'
-    if '성남시' in text and '분당구' in text:
-        return '성남 분당·판교'
+    if '성남시' in text:
+        return '성남 전체'
     return None
 
 

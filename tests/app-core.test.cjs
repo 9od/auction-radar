@@ -1,6 +1,9 @@
 const assert=require('node:assert/strict');
 const A=require('../docs/app-core.js');
 const raw={id:'lot',법원:'성남지원',사건번호:'2025타경1234',용도:'아파트',소재지:'경기도 성남시 분당구 수내동 푸른마을',전용면적:84.5,감정가:2e9,최저입찰가:1.5e9,매각기일:'2026.09.21',진행상황:'신건'};
+assert.equal(A.region('경기도 성남시 수정구 태평동 1'),'성남 전체');
+assert.equal(A.region('경기도 성남시 중원구 은행동 1'),'성남 전체');
+assert.equal(A.region('경기도 성남시 수정구 위례광장로 1'),'위례');
 const i=A.normalized(raw);
 assert(A.scope(i));assert(!A.scope(A.normalized({...raw,전용면적:null})));assert(!A.scope(A.normalized({...raw,최저입찰가:1500000001})));
 assert.equal(A.state(i,'2026-09-22'),'pending');assert.equal(A.state(i,'2026-09-20'),'active');
