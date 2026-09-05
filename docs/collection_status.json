@@ -1,10 +1,110 @@
 {
+  "실행시각": "2026-09-05T09:03:46+09:00",
+  "법원별페이지상한": 8,
+  "목록정렬": "법원 검색 기본 순서 (등록일 최신순 미확인)",
   "전체성공": false,
   "상세": [
     {
-      "종류": "초기 자료",
+      "법원": "수원지방법원",
+      "종류": "진행",
       "성공": false,
-      "오류": "기존 Git 기록을 복원했습니다. 확대 지역과 낙찰결과는 첫 자동 수집 후 확인하세요."
+      "오류": "Message: timeout: Timed out receiving message from renderer: -0.002\n  (Session info: chrome=152.0.7977.64)\nStacktrace:\n#0 0x564eb4acdf5a <unknown>\n#1 0x564eb4436499 <unknown>\n#2 0x564eb441df1b <unknown>\n#3 0x564eb441db96 <unknown>\n#4 0x564e"
+    },
+    {
+      "법원": "성남지원",
+      "종류": "진행",
+      "성공": false,
+      "오류": "Message: timeout: Timed out receiving message from renderer: -0.002\n  (Session info: chrome=152.0.7977.64)\nStacktrace:\n#0 0x564eb4acdf5a <unknown>\n#1 0x564eb4436499 <unknown>\n#2 0x564eb441df1b <unknown>\n#3 0x564eb441db96 <unknown>\n#4 0x564e"
+    },
+    {
+      "법원": "안양지원",
+      "종류": "진행",
+      "성공": false,
+      "오류": "Message: timeout: Timed out receiving message from renderer: -0.002\n  (Session info: chrome=152.0.7977.64)\nStacktrace:\n#0 0x564eb4acdf5a <unknown>\n#1 0x564eb4436499 <unknown>\n#2 0x564eb441df1b <unknown>\n#3 0x564eb441db96 <unknown>\n#4 0x564e"
+    },
+    {
+      "법원": "서울중앙지방법원",
+      "종류": "진행",
+      "성공": false,
+      "오류": "Message: timeout: Timed out receiving message from renderer: -0.002\n  (Session info: chrome=152.0.7977.64)\nStacktrace:\n#0 0x564eb4acdf5a <unknown>\n#1 0x564eb4436499 <unknown>\n#2 0x564eb441df1b <unknown>\n#3 0x564eb441db96 <unknown>\n#4 0x564e"
+    },
+    {
+      "법원": "서울동부지방법원",
+      "종류": "진행",
+      "성공": false,
+      "오류": "Message: timeout: Timed out receiving message from renderer: -0.002\n  (Session info: chrome=152.0.7977.64)\nStacktrace:\n#0 0x564eb4acdf5a <unknown>\n#1 0x564eb4436499 <unknown>\n#2 0x564eb441df1b <unknown>\n#3 0x564eb441db96 <unknown>\n#4 0x564e"
+    },
+    {
+      "법원": "서울서부지방법원",
+      "종류": "진행",
+      "성공": false,
+      "오류": "Message: timeout: Timed out receiving message from renderer: -0.002\n  (Session info: chrome=152.0.7977.64)\nStacktrace:\n#0 0x564eb4acdf5a <unknown>\n#1 0x564eb4436499 <unknown>\n#2 0x564eb441df1b <unknown>\n#3 0x564eb441db96 <unknown>\n#4 0x564e"
+    },
+    {
+      "법원": "서울남부지방법원",
+      "종류": "진행",
+      "성공": false,
+      "오류": "Message: timeout: Timed out receiving message from renderer: -0.002\n  (Session info: chrome=152.0.7977.64)\nStacktrace:\n#0 0x564eb4acdf5a <unknown>\n#1 0x564eb4436499 <unknown>\n#2 0x564eb441df1b <unknown>\n#3 0x564eb441db96 <unknown>\n#4 0x564e"
+    },
+    {
+      "법원": "서울북부지방법원",
+      "종류": "진행",
+      "성공": false,
+      "오류": "Message: timeout: Timed out receiving message from renderer: -0.002\n  (Session info: chrome=152.0.7977.64)\nStacktrace:\n#0 0x564eb4acdf5a <unknown>\n#1 0x564eb4436499 <unknown>\n#2 0x564eb441df1b <unknown>\n#3 0x564eb441db96 <unknown>\n#4 0x564e"
+    },
+    {
+      "법원": "수원지방법원",
+      "종류": "최근결과",
+      "성공": false,
+      "오류": "Message: unknown error: net::ERR_CONNECTION_TIMED_OUT\n  (Session info: chrome=152.0.7977.64)\nStacktrace:\n#0 0x564eb4acdf5a <unknown>\n#1 0x564eb4436499 <unknown>\n#2 0x564eb442d28c <unknown>\n#3 0x564eb441e401 <unknown>\n#4 0x564eb4420166 <unkn"
+    },
+    {
+      "법원": "성남지원",
+      "종류": "최근결과",
+      "성공": false,
+      "오류": "Message: timeout: Timed out receiving message from renderer: -0.002\n  (Session info: chrome=152.0.7977.64)\nStacktrace:\n#0 0x564eb4acdf5a <unknown>\n#1 0x564eb4436499 <unknown>\n#2 0x564eb441df1b <unknown>\n#3 0x564eb441db96 <unknown>\n#4 0x564e"
+    },
+    {
+      "법원": "안양지원",
+      "종류": "최근결과",
+      "성공": false,
+      "오류": "Message: timeout: Timed out receiving message from renderer: 40.000\n  (Session info: chrome=152.0.7977.64)\nStacktrace:\n#0 0x564eb4acdf5a <unknown>\n#1 0x564eb4436499 <unknown>\n#2 0x564eb441df1b <unknown>\n#3 0x564eb441db96 <unknown>\n#4 0x564e"
+    },
+    {
+      "법원": "서울중앙지방법원",
+      "종류": "최근결과",
+      "성공": false,
+      "오류": "Message: timeout: Timed out receiving message from renderer: -0.002\n  (Session info: chrome=152.0.7977.64)\nStacktrace:\n#0 0x564eb4acdf5a <unknown>\n#1 0x564eb4436499 <unknown>\n#2 0x564eb441df1b <unknown>\n#3 0x564eb441db96 <unknown>\n#4 0x564e"
+    },
+    {
+      "법원": "서울동부지방법원",
+      "종류": "최근결과",
+      "성공": false,
+      "오류": "Message: timeout: Timed out receiving message from renderer: 40.000\n  (Session info: chrome=152.0.7977.64)\nStacktrace:\n#0 0x564eb4acdf5a <unknown>\n#1 0x564eb4436499 <unknown>\n#2 0x564eb441df1b <unknown>\n#3 0x564eb441db96 <unknown>\n#4 0x564e"
+    },
+    {
+      "법원": "서울서부지방법원",
+      "종류": "최근결과",
+      "성공": false,
+      "오류": "Message: timeout: Timed out receiving message from renderer: 40.000\n  (Session info: chrome=152.0.7977.64)\nStacktrace:\n#0 0x564eb4acdf5a <unknown>\n#1 0x564eb4436499 <unknown>\n#2 0x564eb441df1b <unknown>\n#3 0x564eb441db96 <unknown>\n#4 0x564e"
+    },
+    {
+      "법원": "서울남부지방법원",
+      "종류": "최근결과",
+      "성공": false,
+      "오류": "Message: timeout: Timed out receiving message from renderer: -0.002\n  (Session info: chrome=152.0.7977.64)\nStacktrace:\n#0 0x564eb4acdf5a <unknown>\n#1 0x564eb4436499 <unknown>\n#2 0x564eb441df1b <unknown>\n#3 0x564eb441db96 <unknown>\n#4 0x564e"
+    },
+    {
+      "법원": "서울북부지방법원",
+      "종류": "최근결과",
+      "성공": false,
+      "오류": "Message: timeout: Timed out receiving message from renderer: -0.002\n  (Session info: chrome=152.0.7977.64)\nStacktrace:\n#0 0x564eb4acdf5a <unknown>\n#1 0x564eb4436499 <unknown>\n#2 0x564eb441df1b <unknown>\n#3 0x564eb441db96 <unknown>\n#4 0x564e"
+    },
+    {
+      "종류": "실행",
+      "성공": false,
+      "오류": "Message: timeout: Timed out receiving message from renderer: 40.000\n  (Session info: chrome=152.0.7977.64)\nStacktrace:\n#0 0x564eb4acdf5a <unknown>\n#1 0x564eb4436499 <unknown>\n#2 0x564eb441df1b <unknown>\n#3 0x564eb441db96 <unknown>\n#4 0x564e",
+      "접근차단": false
     }
   ]
 }
