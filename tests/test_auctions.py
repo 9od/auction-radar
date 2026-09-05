@@ -5,7 +5,8 @@ from pathlib import Path
 from auction_model import (CONFIG, amount, date_only, empty_archive, in_scope, load_json,
                            merge_archive, normalize, region_of, state_of, write_json)
 from scraper import (parse_listing, parse_case_results, parse_result_table,
-                     current_listing_snapshot, CollectionError, BlockedError)
+                     current_listing_snapshot, rotating_batch,
+                     CollectionError, BlockedError)
 
 
 def lot(**values):
@@ -37,6 +38,14 @@ class AuctionTests(unittest.TestCase):
         legacy = normalize(legacy)
         snapshot = current_listing_snapshot([fresh], [legacy])
         self.assertEqual(list(snapshot), [fresh['id']])
+
+    def test_result_case_batch_is_bounded_and_rotates(self):
+        entries = list(range(7))
+        first = rotating_batch(entries, 3, '2026-09-05')
+        second = rotating_batch(entries, 3, '2026-09-06')
+        self.assertEqual(len(first), 3)
+        self.assertNotEqual(first, second)
+        self.assertEqual(rotating_batch(entries, 20, '2026-09-05'), entries)
 
     def test_all_seoul_and_precise_regions(self):
         for district in ('강북구','마포구','은평구','중랑구','금천구'):
