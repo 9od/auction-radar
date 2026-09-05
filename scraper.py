@@ -333,6 +333,20 @@ def fetch_case(driver, court_code, case_no):
     return json.loads(result['text'])
 
 
+def current_listing_snapshot(incoming, previous_items):
+    """Keep last-known rows without duplicating legacy rows that lacked a lot number."""
+    current = {i['id']: i for i in incoming if in_scope(i)}
+    natural_keys = {(i['법원'], i['사건번호'], i['주소']) for i in current.values()}
+    for raw in previous_items:
+        old = normalize(raw)
+        natural_key = (old['법원'], old['사건번호'], old['주소'])
+        if not old.get('물건번호') and natural_key in natural_keys:
+            continue
+        if in_scope(old) and old['id'] not in current:
+            current[old['id']] = dict(old, 재확인필요=True)
+    return current
+
+
 def run(args):
     archive_path = Path(args.archive)
     archive = load_json(archive_path, empty_archive())
@@ -413,11 +427,7 @@ def run(args):
         archive = merge_archive(archive, incoming)
     write_json(archive_path, archive)
     success_courts = {r['법원'] for r in reports if r.get('종류') == '진행' and r.get('성공')}
-    new_by_id = {i['id']: i for i in incoming if in_scope(i)}
-    for raw in previous.get('items', []):
-        old = normalize(raw)
-        if in_scope(old) and old['id'] not in new_by_id:
-            new_by_id[old['id']] = dict(old, 재확인필요=True)
+    new_by_id = current_listing_snapshot(incoming, previous.get('items', []))
     for item in new_by_id.values():
         item['목록상태'] = state_of(item)
     stamp = now_kst()
