@@ -123,6 +123,25 @@ class AuctionTests(unittest.TestCase):
 
 
 class FailureAndPaginationTests(unittest.TestCase):
+    def test_select_uses_websquare_change_event(self):
+        from unittest.mock import patch
+        from scraper import select_text
+        class Option:
+            text = '수원지방법원'
+            def get_attribute(self, name): return 'B000250'
+        class Element:
+            def find_elements(self, by, value): return [Option()]
+        class Driver:
+            script_args = None
+            def find_element(self, by, value): return Element()
+            def execute_script(self, script, *args): self.script_args = (script, args)
+        driver = Driver()
+        with patch('scraper.time.sleep'):
+            code = select_text(driver, 'court', '수원지방법원')
+        self.assertEqual(code, 'B000250')
+        self.assertIn("dispatchEvent(new Event('change'", driver.script_args[0])
+        self.assertEqual(driver.script_args[1][1], 'B000250')
+
     def test_page_loader_retries_a_renderer_timeout(self):
         import sys
         from types import ModuleType

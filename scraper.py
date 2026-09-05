@@ -215,15 +215,18 @@ def restart_driver(driver):
 
 
 def select_text(driver, el_id, value):
-    from selenium.webdriver.support.ui import Select
     element = driver.find_element('id', el_id)
-    select = Select(element)
-    opt = next((o for o in select.options if o.text.strip() == value or o.text.strip().endswith(' ' + value)), None)
+    options = element.find_elements('tag name', 'option')
+    opt = next((o for o in options if o.text.strip() == value or o.text.strip().endswith(' ' + value)), None)
     if opt is None:
         raise CollectionError(f'{value}: 법원/분류 선택항목 없음')
-    select.select_by_value(opt.get_attribute('value'))
+    selected_value = opt.get_attribute('value')
+    driver.execute_script('''
+        arguments[0].value = arguments[1];
+        arguments[0].dispatchEvent(new Event('change', {bubbles: true}));
+    ''', element, selected_value)
     time.sleep(1)
-    return opt.get_attribute('value')
+    return selected_value
 
 
 def current_page(driver):
