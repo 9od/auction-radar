@@ -1,6 +1,13 @@
 name: 경매 데이터 자동 수집
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - scraper.py
+      - auction_model.py
+      - auction_config.json
+      - .github/workflows/scrape.yml
   schedule:
     - cron: '0 22 * * *' # KST 07:00
   workflow_dispatch:
@@ -49,8 +56,8 @@ jobs:
             git commit -m "경매 목록·결과 이력 갱신"
             git push
           fi
-      - name: 일부 수집 실패 알림
+      - name: 현재 경매 목록 수집 실패 알림
         if: steps.collect.outcome == 'failure'
         run: |
-          echo '일부 수집이 실패했습니다. 기존 기록은 유지됩니다. docs/collection_status.json을 확인하세요.'
+          echo '현재 경매 목록 수집이 실패했습니다. 기존 기록은 유지됩니다. docs/collection_status.json을 확인하세요.'
           exit 1
