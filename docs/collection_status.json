@@ -1,5 +1,5 @@
 {
-  "실행시각": "2026-11-21T12:10:11+09:00",
+  "실행시각": "2026-11-22T11:06:46+09:00",
   "법원별페이지상한": 8,
   "목록정렬": "법원 검색 기본 순서 (등록일 최신순 미확인)",
   "목록수집성공": true,
@@ -107,13 +107,6 @@
       "성공": true,
       "전체후보": 282,
       "확인건수": 12
-    },
-    {
-      "법원": "안양지원",
-      "사건번호": "2024타경102623",
-      "종류": "기일내역",
-      "성공": false,
-      "오류": "Message: script timeout\n  (Session info: chrome=157.0.8103.78)\nStacktrace:\n#0 0x62d6ae11dcaa <unknown>\n#1 0x62d6ada51b52 <unknown>\n#2 0x62d6adad45b0 <unknown>\n#3 0x62d6adad3db3 <unknown>\n#4 0x62d6adad36c1 <unknown>\n#5 0x62d6ada8e557 <unknow"
     },
     {
       "종류": "실행",
